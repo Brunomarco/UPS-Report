@@ -1,581 +1,614 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 from datetime import datetime
 import numpy as np
 import calendar
 
-# Page configuration - matching the screenshots' style
+# Page configuration
 st.set_page_config(
-    page_title="Green to Brown Utilization Dashboard",
-    page_icon="✈️",
+    page_title="Green to Brown Monthly Utilization Stats",
+    page_icon="📦",
     layout="wide"
 )
 
-# Custom CSS to match the screenshot styling
+# Custom CSS to match the screenshot style
 st.markdown("""
 <style>
-    /* Main container styling */
-    .stApp {
-        background-color: #f5f5f5;
-    }
-    
-    /* Header styling to match screenshot */
-    .dashboard-header {
-        background: linear-gradient(90deg, #2e7d32 0%, #8b4513 50%, #ff9800 100%);
-        color: white;
-        padding: 20px;
-        border-radius: 10px;
-        margin-bottom: 20px;
-        font-size: 32px;
+    .main-header {
+        font-size: 36px;
         font-weight: bold;
+        color: #333;
+        margin-bottom: 20px;
     }
     
-    /* Metric cards styling */
     .metric-container {
-        background-color: white;
+        background-color: #f8f9fa;
         padding: 15px;
         border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         margin-bottom: 10px;
     }
     
-    /* Table styling to match screenshot */
-    .dataframe {
-        font-size: 12px !important;
+    [data-testid="metric-container"] {
+        background-color: rgba(255, 255, 255, 0.95);
+        border: 1px solid #e0e0e0;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
-        background-color: #e0e0e0;
-        padding: 10px;
-        border-radius: 10px;
+        gap: 8px;
     }
     
     .stTabs [data-baseweb="tab"] {
-        background-color: white;
-        border-radius: 5px;
         padding: 10px 20px;
-        font-weight: bold;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background-color: #ff9800;
-        color: white;
-    }
-    
-    /* Metric value styling */
-    [data-testid="metric-container"] {
-        background-color: rgba(255, 255, 255, 0.9);
-        border: 1px solid #e0e0e0;
-        padding: 10px;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    
-    /* Make metric values larger */
-    [data-testid="metric-container"] > div:nth-child(1) {
-        font-size: 14px;
-        color: #666;
-    }
-    
-    [data-testid="metric-container"] > div:nth-child(2) {
-        font-size: 28px;
-        font-weight: bold;
+        font-weight: 600;
     }
 </style>
 """, unsafe_allow_html=True)
 
 @st.cache_data
-def load_and_process_data(file):
-    """Load and process the Excel file with correct data extraction"""
+def load_data():
+    """Load and process the Excel data"""
     try:
-        # Read the Excel file
-        df = pd.read_excel(file, sheet_name=0)
+        # Load the Excel file
+        df = pd.read_excel('MNX GLOBAL AF ACTIVITY 2024 V2.xlsx')
         
-        # Ensure we have the required columns
-        required_cols = ['Airline', 'Charge Weight kg', 'Air COGS']
-        if not all(col in df.columns for col in required_cols):
-            st.error(f"Missing required columns. Found: {df.columns.tolist()}")
-            return pd.DataFrame()
+        # Parse the date column (M/D/YYYY format)
+        df['OriginDeparture Date'] = pd.to_datetime(df['OriginDeparture Date'], format='%m/%d/%Y', errors='coerce')
         
-        # Parse dates if available
-        if 'OriginDeparture Date' in df.columns:
-            # Handle the date format M/D/YYYY
-            df['OriginDeparture Date'] = pd.to_datetime(df['OriginDeparture Date'], format='mixed', errors='coerce')
-            df['Month'] = df['OriginDeparture Date'].dt.month
-            df['Year'] = df['OriginDeparture Date'].dt.year
-            df['Month_Name'] = df['OriginDeparture Date'].dt.strftime('%B')
+        # Extract month and year
+        df['Month'] = df['OriginDeparture Date'].dt.month
+        df['Year'] = df['OriginDeparture Date'].dt.year
+        df['Month_Name'] = df['OriginDeparture Date'].dt.strftime('%B')
+        df['Month_Year'] = df['OriginDeparture Date'].dt.strftime('%Y-%m')
         
-        # Add region columns if they exist
-        if 'Origin Region ' not in df.columns:
-            df['Origin Region '] = 'Unknown'
-        if 'Destination Region' not in df.columns:
-            df['Destination Region'] = 'Unknown'
-        if 'Region Lane' not in df.columns and 'Origin Region ' in df.columns and 'Destination Region' in df.columns:
-            df['Region Lane'] = df['Origin Region '].astype(str) + df['Destination Region'].astype(str)
+        # Define UPS/Brown carriers
+        # IMPORTANT: Update this list with actual UPS carrier names if they exist in your data
+        ups_carriers = ['UPS', 'United Parcel Service', 'UPS Airlines']
         
-        # CRITICAL: Define UPS correctly
-        # Since UPS might not be in the data, we'll use a configurable list
-        # You should update this list with the actual UPS carrier names in your data
-        ups_carriers = ['UPS', 'United Parcel Service', 'UPS Airlines']  # Add actual UPS identifiers here
+        # Check if any UPS carriers exist in the data
+        actual_ups = [c for c in ups_carriers if c in df['Airline'].unique()]
         
-        # For demo purposes, let's consider some carriers as "Brown" (UPS equivalent)
-        # You should replace this with actual UPS carriers
-        brown_carriers = ['UPS'] + [c for c in df['Airline'].unique() if 'UPS' in str(c).upper()]
-        
-        # If no UPS found, use largest carrier as proxy for demo
-        if len(brown_carriers) == 0:
-            carrier_volumes = df.groupby('Airline')['Charge Weight kg'].sum().sort_values(ascending=False)
-            brown_carriers = [carrier_volumes.index[0]]  # Use largest carrier as "Brown"
-            st.info(f"No UPS found. Using '{brown_carriers[0]}' as Brown carrier for demonstration.")
+        if not actual_ups:
+            # If no UPS found, you can specify which airlines to treat as "Brown"
+            # For demo, let's use DHL as Brown (you should change this)
+            brown_carriers = ['DHL AERO EXPRESO SA', 'DHL AMS', 'DHL AUSTRALIA']
+            st.sidebar.warning("⚠️ No UPS found in data. Using DHL carriers as Brown for demo. Please update the code with actual UPS carrier names.")
+        else:
+            brown_carriers = actual_ups
         
         # Categorize as Brown (UPS) or Green (all others)
-        df['Category'] = df['Airline'].apply(lambda x: 'Brown' if x in brown_carriers else 'Green')
+        df['Is_Brown'] = df['Airline'].isin(brown_carriers)
+        df['Category'] = df['Is_Brown'].map({True: 'Brown', False: 'Green'})
         
-        # Calculate commercial cost (you may need to adjust this based on your actual data)
-        # If there's a commercial cost column, use it. Otherwise estimate
-        if 'Commercial Cost' in df.columns:
-            df['Commercial_Cost'] = df['Commercial Cost']
-        else:
-            # Estimate commercial cost as higher than Air COGS
-            df['Commercial_Cost'] = df['Air COGS'] * 1.25  # 25% markup assumption
+        # Create region pair column
+        df['Region_Pair'] = df['Origin Region '].astype(str) + ' → ' + df['Destination Region'].astype(str)
         
-        # Calculate savings (money saved by using UPS vs commercial)
-        df['Savings'] = df['Commercial_Cost'] - df['Air COGS']
-        
-        return df
+        return df, brown_carriers
         
     except Exception as e:
-        st.error(f"Error processing file: {str(e)}")
-        return pd.DataFrame()
+        st.error(f"Error loading data: {str(e)}")
+        return pd.DataFrame(), []
 
-def calculate_monthly_metrics_pivoted(df, year=2024):
-    """Calculate metrics with months as columns and metrics as rows (matching screenshot format)"""
-    if df.empty:
-        return pd.DataFrame()
+def calculate_monthly_metrics(df):
+    """Calculate monthly metrics for the current year"""
+    # Filter for 2024 (current year)
+    df_2024 = df[df['Year'] == 2024].copy()
     
-    # Filter for the year
-    df_year = df[df['Year'] == year] if 'Year' in df.columns else df
-    
-    if df_year.empty:
+    if df_2024.empty:
+        st.warning("No data found for 2024")
         return pd.DataFrame()
     
     # Group by month and category
-    monthly_data = []
+    monthly_metrics = df_2024.groupby(['Month', 'Month_Name', 'Category']).agg({
+        'Charge Weight kg': 'sum',
+        'Air COGS': 'sum',
+        'Job ID': 'count'
+    }).reset_index()
     
-    for month in range(1, 13):
-        month_df = df_year[df_year['Month'] == month] if 'Month' in df_year.columns else pd.DataFrame()
-        
-        if not month_df.empty:
-            brown_df = month_df[month_df['Category'] == 'Brown']
-            green_df = month_df[month_df['Category'] == 'Green']
-            
-            brown_volume = brown_df['Charge Weight kg'].sum()
-            green_volume = green_df['Charge Weight kg'].sum()
-            total_volume = brown_volume + green_volume
-            
-            brown_cost = brown_df['Air COGS'].sum()
-            green_cost = green_df['Air COGS'].sum()
-            
-            savings = month_df['Savings'].sum()
-            
-            monthly_data.append({
-                'Month': calendar.month_abbr[month],
-                'Brown_Volume_kg': brown_volume,
-                'Green_Volume_kg': green_volume,
-                'Total_Volume_kg': total_volume,
-                'Utilization_%': (brown_volume / total_volume * 100) if total_volume > 0 else 0,
-                'Brown_Cost': brown_cost,
-                'Green_Cost': green_cost,
-                'Savings': savings,
-                'Brown_Cost/kg': brown_cost / brown_volume if brown_volume > 0 else 0,
-                'Green_Cost/kg': green_cost / green_volume if green_volume > 0 else 0
-            })
+    # Pivot to get Brown and Green side by side
+    pivot_weight = monthly_metrics.pivot_table(
+        index=['Month', 'Month_Name'],
+        columns='Category',
+        values='Charge Weight kg',
+        fill_value=0
+    ).reset_index()
     
-    return pd.DataFrame(monthly_data)
+    pivot_cost = monthly_metrics.pivot_table(
+        index=['Month', 'Month_Name'],
+        columns='Category',
+        values='Air COGS',
+        fill_value=0
+    ).reset_index()
+    
+    # Merge the data
+    result = pivot_weight.copy()
+    
+    # Ensure columns exist
+    if 'Brown' not in result.columns:
+        result['Brown'] = 0
+    if 'Green' not in result.columns:
+        result['Green'] = 0
+    
+    # Calculate metrics
+    result['Brown_Volume_kg'] = result['Brown']
+    result['Green_Volume_kg'] = result['Green']
+    result['Total_Volume_kg'] = result['Brown_Volume_kg'] + result['Green_Volume_kg']
+    
+    # Calculate utilization %
+    result['Utilization_%'] = np.where(
+        result['Total_Volume_kg'] > 0,
+        (result['Brown_Volume_kg'] / result['Total_Volume_kg']) * 100,
+        0
+    )
+    
+    # Add costs
+    result['Brown_Cost'] = pivot_cost.get('Brown', 0)
+    result['Green_Cost'] = pivot_cost.get('Green', 0)
+    
+    # Calculate cost per kg
+    result['Brown_Cost_per_kg'] = np.where(
+        result['Brown_Volume_kg'] > 0,
+        result['Brown_Cost'] / result['Brown_Volume_kg'],
+        0
+    )
+    
+    result['Green_Cost_per_kg'] = np.where(
+        result['Green_Volume_kg'] > 0,
+        result['Green_Cost'] / result['Green_Volume_kg'],
+        0
+    )
+    
+    # Calculate savings (assuming commercial rate is 20% higher than UPS rate)
+    # Adjust this formula based on your actual commercial rates
+    result['Commercial_Cost'] = result['Brown_Cost'] * 1.2
+    result['Savings'] = result['Commercial_Cost'] - result['Brown_Cost']
+    
+    return result.sort_values('Month')
 
-def calculate_regional_metrics_for_month(df, month, year=2024):
-    """Calculate regional metrics matching the screenshot format"""
-    if df.empty:
-        return pd.DataFrame()
-    
-    # Filter for specific month and year
-    if 'Month' in df.columns and 'Year' in df.columns:
-        df_month = df[(df['Month'] == month) & (df['Year'] == year)]
-    else:
-        df_month = df
+def calculate_regional_metrics(df, selected_month):
+    """Calculate metrics by region for a specific month"""
+    # Filter for selected month and year 2024
+    df_month = df[(df['Month'] == selected_month) & (df['Year'] == 2024)].copy()
     
     if df_month.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
     
-    # Define regions as shown in screenshot
-    regions = ['APAC', 'EUROPE', 'ISMEA', 'LATIN AMERICA', 'NORTH AMERICA']
+    # By Region Lane
+    regional_metrics = df_month.groupby(['Region Lane', 'Category']).agg({
+        'Charge Weight kg': 'sum',
+        'Air COGS': 'sum'
+    }).reset_index()
     
-    regional_data = []
+    # Pivot for region metrics
+    pivot_region_weight = regional_metrics.pivot_table(
+        index='Region Lane',
+        columns='Category',
+        values='Charge Weight kg',
+        fill_value=0
+    ).reset_index()
     
-    for region in regions:
-        # Check different possible region formats
-        if 'Region Lane' in df_month.columns:
-            region_df = df_month[df_month['Region Lane'].str.contains(region.replace(' ', ''), case=False, na=False)]
-        elif 'Origin Region ' in df_month.columns:
-            region_df = df_month[df_month['Origin Region '].str.contains(region.replace(' ', ''), case=False, na=False)]
-        else:
-            region_df = pd.DataFrame()
-        
-        if not region_df.empty:
-            brown_df = region_df[region_df['Category'] == 'Brown']
-            green_df = region_df[region_df['Category'] == 'Green']
-            
-            brown_volume = brown_df['Charge Weight kg'].sum()
-            green_volume = green_df['Charge Weight kg'].sum()
-            total_volume = brown_volume + green_volume
-            
-            brown_cost = brown_df['Air COGS'].sum()
-            green_cost = green_df['Air COGS'].sum()
-            
-            utilization = (brown_volume / total_volume * 100) if total_volume > 0 else 0
-            
-            regional_data.append({
-                'ORIG_REGION': region,
-                'Target %': 25.0,  # Default target, adjust as needed
-                'Actual Utilization %': utilization,
-                '% Effective': (utilization / 25.0 * 100) if 25.0 > 0 else 0,
-                'LY BT Volume': brown_volume * 0.9,  # Last year estimate
-                'BT Volume': brown_volume,
-                'Actual Savings': brown_df['Savings'].sum(),
-                'Actual Weight Impact': brown_volume,
-                'Actual Rate Impact': brown_cost / brown_volume if brown_volume > 0 else 0,
-                'YoY Savings': brown_df['Savings'].sum() * 0.1  # YoY estimate
-            })
+    pivot_region_cost = regional_metrics.pivot_table(
+        index='Region Lane',
+        columns='Category',
+        values='Air COGS',
+        fill_value=0
+    ).reset_index()
     
-    return pd.DataFrame(regional_data)
+    # Merge and calculate metrics
+    region_result = pivot_region_weight.copy()
+    
+    if 'Brown' not in region_result.columns:
+        region_result['Brown'] = 0
+    if 'Green' not in region_result.columns:
+        region_result['Green'] = 0
+    
+    region_result['Brown_Volume_kg'] = region_result['Brown']
+    region_result['Green_Volume_kg'] = region_result['Green']
+    region_result['Total_Volume_kg'] = region_result['Brown_Volume_kg'] + region_result['Green_Volume_kg']
+    region_result['Utilization_%'] = np.where(
+        region_result['Total_Volume_kg'] > 0,
+        (region_result['Brown_Volume_kg'] / region_result['Total_Volume_kg']) * 100,
+        0
+    )
+    
+    # Add costs
+    region_result['Brown_Cost'] = pivot_region_cost.get('Brown', 0)
+    region_result['Green_Cost'] = pivot_region_cost.get('Green', 0)
+    
+    # Cost per kg
+    region_result['Brown_Cost_per_kg'] = np.where(
+        region_result['Brown_Volume_kg'] > 0,
+        region_result['Brown_Cost'] / region_result['Brown_Volume_kg'],
+        0
+    )
+    
+    region_result['Green_Cost_per_kg'] = np.where(
+        region_result['Green_Volume_kg'] > 0,
+        region_result['Green_Cost'] / region_result['Green_Volume_kg'],
+        0
+    )
+    
+    # Savings
+    region_result['Commercial_Cost'] = region_result['Brown_Cost'] * 1.2
+    region_result['Savings'] = region_result['Commercial_Cost'] - region_result['Brown_Cost']
+    
+    # By Region Pair (Origin → Destination)
+    pair_metrics = df_month.groupby(['Region_Pair', 'Category']).agg({
+        'Charge Weight kg': 'sum',
+        'Air COGS': 'sum'
+    }).reset_index()
+    
+    # Pivot for region pair metrics
+    pivot_pair_weight = pair_metrics.pivot_table(
+        index='Region_Pair',
+        columns='Category',
+        values='Charge Weight kg',
+        fill_value=0
+    ).reset_index()
+    
+    pivot_pair_cost = pair_metrics.pivot_table(
+        index='Region_Pair',
+        columns='Category',
+        values='Air COGS',
+        fill_value=0
+    ).reset_index()
+    
+    # Merge and calculate metrics for pairs
+    pair_result = pivot_pair_weight.copy()
+    
+    if 'Brown' not in pair_result.columns:
+        pair_result['Brown'] = 0
+    if 'Green' not in pair_result.columns:
+        pair_result['Green'] = 0
+    
+    pair_result['Brown_Volume_kg'] = pair_result['Brown']
+    pair_result['Green_Volume_kg'] = pair_result['Green']
+    pair_result['Total_Volume_kg'] = pair_result['Brown_Volume_kg'] + pair_result['Green_Volume_kg']
+    pair_result['Utilization_%'] = np.where(
+        pair_result['Total_Volume_kg'] > 0,
+        (pair_result['Brown_Volume_kg'] / pair_result['Total_Volume_kg']) * 100,
+        0
+    )
+    
+    # Add costs
+    pair_result['Brown_Cost'] = pivot_pair_cost.get('Brown', 0)
+    pair_result['Green_Cost'] = pivot_pair_cost.get('Green', 0)
+    
+    # Cost per kg
+    pair_result['Brown_Cost_per_kg'] = np.where(
+        pair_result['Brown_Volume_kg'] > 0,
+        pair_result['Brown_Cost'] / pair_result['Brown_Volume_kg'],
+        0
+    )
+    
+    pair_result['Green_Cost_per_kg'] = np.where(
+        pair_result['Green_Volume_kg'] > 0,
+        pair_result['Green_Cost'] / pair_result['Green_Volume_kg'],
+        0
+    )
+    
+    # Savings
+    pair_result['Commercial_Cost'] = pair_result['Brown_Cost'] * 1.2
+    pair_result['Savings'] = pair_result['Commercial_Cost'] - pair_result['Brown_Cost']
+    
+    # Sort by total volume
+    pair_result = pair_result.sort_values('Total_Volume_kg', ascending=False)
+    
+    return region_result, pair_result
 
-def format_number(value, prefix='', suffix='', decimals=0):
-    """Format numbers matching screenshot style"""
+def format_number(value, decimals=0):
+    """Format large numbers with K, M, B suffixes"""
     if pd.isna(value) or value == 0:
-        return f"{prefix}0{suffix}"
+        return "0"
     
     if abs(value) >= 1e9:
-        return f"{prefix}{value/1e9:.{decimals}f}B{suffix}"
+        return f"{value/1e9:.{decimals}f}B"
     elif abs(value) >= 1e6:
-        return f"{prefix}{value/1e6:.{decimals}f}M{suffix}"
+        return f"{value/1e6:.{decimals}f}M"
     elif abs(value) >= 1e3:
-        return f"{prefix}{value/1e3:.{decimals}f}K{suffix}"
+        return f"{value/1e3:.{decimals}f}K"
     else:
-        return f"{prefix}{value:.{decimals}f}{suffix}"
+        return f"{value:.{decimals}f}"
 
 def format_currency(value):
-    """Format currency values with proper notation"""
+    """Format currency values"""
     if pd.isna(value) or value == 0:
         return "$0"
-    
-    if value < 0:
-        prefix = "($"
-        value = abs(value)
-        suffix = ")"
-    else:
-        prefix = "$"
-        suffix = ""
-    
-    if value >= 1e6:
-        return f"{prefix}{value/1e6:.1f}M{suffix}"
-    elif value >= 1e3:
-        return f"{prefix}{value/1e3:.1f}K{suffix}"
-    else:
-        return f"{prefix}{value:.0f}{suffix}"
+    return f"${format_number(value, 2)}"
 
 # Main app
 def main():
-    # Header matching screenshot style
-    st.markdown('<div class="dashboard-header">Green to Brown Monthly Utilization Stats</div>', 
+    # Header
+    st.markdown('<h1 style="color: #2e7d32;">Green to Brown Monthly Utilization Stats</h1>', 
                 unsafe_allow_html=True)
     
-    # Initialize session state
-    if 'df' not in st.session_state:
-        st.session_state.df = pd.DataFrame()
-    
-    # Sidebar for file upload
-    with st.sidebar:
-        st.header("📊 Data Configuration")
-        
-        uploaded_file = st.file_uploader(
-            "Upload MNX GLOBAL AF ACTIVITY Excel",
-            type=['xlsx', 'xls'],
-            help="Upload your shipping data Excel file"
-        )
-        
-        if uploaded_file:
-            with st.spinner('Processing Excel file...'):
-                df = load_and_process_data(uploaded_file)
-                if not df.empty:
-                    st.session_state.df = df
-                    st.success(f"✅ Loaded {len(df):,} rows")
-                    
-                    # Show Brown carrier info
-                    brown_count = len(df[df['Category'] == 'Brown'])
-                    green_count = len(df[df['Category'] == 'Green'])
-                    st.info(f"Brown (UPS): {brown_count:,} rows\nGreen (Others): {green_count:,} rows")
-    
-    # Get dataframe
-    df = st.session_state.df
+    # Load data
+    with st.spinner('Loading data...'):
+        df, brown_carriers = load_data()
     
     if df.empty:
-        st.warning("⚠️ Please upload the MNX GLOBAL AF ACTIVITY Excel file to begin")
-        st.stop()
+        st.error("Failed to load data. Please ensure 'MNX GLOBAL AF ACTIVITY 2024 V2.xlsx' is in the same directory.")
+        return
     
-    # Create tabs matching the screenshots
+    # Sidebar info
+    with st.sidebar:
+        st.header("📊 Dashboard Info")
+        st.info(f"""
+        **Data Loaded:**
+        - Total Records: {len(df):,}
+        - Year 2024 Records: {len(df[df['Year'] == 2024]):,}
+        
+        **Categories:**
+        - Brown (UPS): {len(df[df['Category'] == 'Brown']):,} records
+        - Green (Others): {len(df[df['Category'] == 'Green']):,} records
+        
+        **Current Brown Carriers:**
+        {', '.join(brown_carriers[:3])}{'...' if len(brown_carriers) > 3 else ''}
+        """)
+        
+        st.warning("""
+        ⚠️ **Configuration Note:**
+        
+        If UPS is not in your data, update the `ups_carriers` list in the code with the actual UPS carrier names from your Excel file.
+        """)
+    
+    # Create tabs
     tab1, tab2 = st.tabs(["📅 Monthly Overview", "🌍 Regional Analysis"])
     
     with tab1:
-        # Year selector
-        current_year = st.selectbox("Select Year", [2024, 2023], index=0)
+        st.header("Monthly Utilization - Year 2024")
         
         # Calculate monthly metrics
-        monthly_df = calculate_monthly_metrics_pivoted(df, current_year)
+        monthly_data = calculate_monthly_metrics(df)
         
-        if not monthly_df.empty:
-            # Top metrics row (matching screenshot)
+        if not monthly_data.empty:
+            # Display top-level metrics
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             
-            total_brown = monthly_df['Brown_Volume_kg'].sum()
-            total_green = monthly_df['Green_Volume_kg'].sum()
+            total_brown = monthly_data['Brown_Volume_kg'].sum()
+            total_green = monthly_data['Green_Volume_kg'].sum()
             total_volume = total_brown + total_green
             overall_utilization = (total_brown / total_volume * 100) if total_volume > 0 else 0
-            total_savings = monthly_df['Savings'].sum()
+            total_savings = monthly_data['Savings'].sum()
+            avg_brown_cost = monthly_data['Brown_Cost_per_kg'].mean()
+            avg_green_cost = monthly_data['Green_Cost_per_kg'].mean()
             
             with col1:
-                st.metric("BT Utilization (Region)", f"{overall_utilization:.1f}%", "27.0%")
+                st.metric("Overall Utilization %", f"{overall_utilization:.1f}%")
             
             with col2:
-                st.metric("% Effective", "125.7%", "+5.7%")
+                st.metric("Total Volume", format_number(total_volume))
             
             with col3:
-                st.metric("This Year Volume", format_number(total_volume, suffix='M'), "75.1M")
+                st.metric("Brown Volume", format_number(total_brown))
             
             with col4:
-                st.metric("Enterprise Synergy", format_currency(total_savings), "$96.3M")
+                st.metric("Green Volume", format_number(total_green))
             
             with col5:
-                st.metric("Actual Weight Impact", format_currency(total_brown * 0.1), "$48.8M")
+                st.metric("Total Savings", format_currency(total_savings))
             
             with col6:
-                st.metric("YoY Savings", format_currency(total_savings * 1.1), "$49.2M")
+                st.metric("Avg Brown Cost/kg", f"${avg_brown_cost:.2f}")
             
-            # Create the pivoted table (months as columns)
-            st.subheader("Utilization")
+            # Monthly metrics table
+            st.subheader("📊 Monthly Metrics Table")
             
-            # Prepare data in the format shown in screenshot
-            utilization_data = {
-                'Metric': ['Target %', 'Actual Utilization %', '% Effective']
-            }
+            # Prepare display table
+            display_df = monthly_data[['Month_Name', 'Brown_Volume_kg', 'Green_Volume_kg', 
+                                       'Total_Volume_kg', 'Utilization_%', 'Savings',
+                                       'Brown_Cost_per_kg', 'Green_Cost_per_kg']].copy()
             
-            for _, row in monthly_df.iterrows():
-                month = row['Month']
-                utilization_data[month] = [
-                    30.0,  # Target
-                    round(row['Utilization_%'], 1),
-                    round(row['Utilization_%'] / 30.0 * 100, 1) if 30.0 > 0 else 0
-                ]
+            # Format columns for display
+            display_df['Brown_Volume_kg'] = display_df['Brown_Volume_kg'].apply(lambda x: format_number(x))
+            display_df['Green_Volume_kg'] = display_df['Green_Volume_kg'].apply(lambda x: format_number(x))
+            display_df['Total_Volume_kg'] = display_df['Total_Volume_kg'].apply(lambda x: format_number(x))
+            display_df['Utilization_%'] = display_df['Utilization_%'].apply(lambda x: f"{x:.1f}%")
+            display_df['Savings'] = display_df['Savings'].apply(format_currency)
+            display_df['Brown_Cost_per_kg'] = display_df['Brown_Cost_per_kg'].apply(lambda x: f"${x:.2f}")
+            display_df['Green_Cost_per_kg'] = display_df['Green_Cost_per_kg'].apply(lambda x: f"${x:.2f}")
             
-            util_df = pd.DataFrame(utilization_data)
+            # Rename columns for better display
+            display_df.columns = ['Month', 'Brown Volume (kg)', 'Green Volume (kg)', 
+                                  'Total Volume (kg)', 'Utilization %', 'Savings ($)',
+                                  'Brown Cost/kg', 'Green Cost/kg']
             
-            # Style the dataframe to match screenshot
-            styled_util = util_df.style.format({
-                col: '{:.1f}%' for col in util_df.columns if col != 'Metric'
-            })
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
             
-            st.dataframe(styled_util, use_container_width=True, hide_index=True)
+            # Utilization Chart
+            st.subheader("📈 Monthly Utilization % Trend")
             
-            # Savings Impact section
-            st.subheader("Savings Impact")
-            
-            savings_data = {
-                'Metric': ['LY BT Volume', 'BT Volume', 'Actual Savings', 
-                          'Actual Weight Impact', 'Actual Rate Impact', 'YoY Savings']
-            }
-            
-            for _, row in monthly_df.iterrows():
-                month = row['Month']
-                savings_data[month] = [
-                    row['Brown_Volume_kg'] * 0.9,  # LY estimate
-                    row['Brown_Volume_kg'],
-                    row['Savings'],
-                    row['Brown_Volume_kg'],
-                    row['Brown_Cost/kg'],
-                    row['Savings'] * 0.1
-                ]
-            
-            savings_df = pd.DataFrame(savings_data)
-            
-            # Format the savings dataframe
-            def format_savings_cell(val, metric):
-                if metric in ['LY BT Volume', 'BT Volume', 'Actual Weight Impact']:
-                    return format_number(val, suffix='')
-                elif metric in ['Actual Savings', 'YoY Savings']:
-                    return format_currency(val)
-                elif metric == 'Actual Rate Impact':
-                    return f"${val:.2f}"
-                return val
-            
-            for col in savings_df.columns:
-                if col != 'Metric':
-                    savings_df[col] = savings_df.apply(
-                        lambda x: format_savings_cell(x[col], x['Metric']), axis=1
-                    )
-            
-            st.dataframe(savings_df, use_container_width=True, hide_index=True)
-            
-            # BT Utilization % by Month chart
-            st.subheader("BT Utilization % by Month and Year")
-            
-            # Create the chart matching the screenshot
             fig = go.Figure()
             
-            # Add current year line
+            # Add utilization line
             fig.add_trace(go.Scatter(
-                x=monthly_df['Month'],
-                y=monthly_df['Utilization_%'],
+                x=monthly_data['Month_Name'],
+                y=monthly_data['Utilization_%'],
                 mode='lines+markers',
-                name=f'{current_year}',
-                line=dict(color='#2e7d32', width=2),
-                marker=dict(size=8)
+                name='Utilization %',
+                line=dict(color='#2e7d32', width=3),
+                marker=dict(size=10, color='#2e7d32'),
+                text=[f"{x:.1f}%" for x in monthly_data['Utilization_%']],
+                textposition='top center'
             ))
             
-            # Add previous year line (example data)
+            # Add target line (example: 30%)
             fig.add_trace(go.Scatter(
-                x=monthly_df['Month'],
-                y=monthly_df['Utilization_%'] * 0.85,  # Example: 85% of current
-                mode='lines+markers',
-                name=f'{current_year - 1}',
-                line=dict(color='#ff9800', width=2),
-                marker=dict(size=8)
+                x=monthly_data['Month_Name'],
+                y=[30] * len(monthly_data),
+                mode='lines',
+                name='Target (30%)',
+                line=dict(color='orange', width=2, dash='dash')
             ))
             
             fig.update_layout(
                 xaxis_title="Month",
                 yaxis_title="Utilization %",
-                yaxis=dict(range=[15, 40]),
-                xaxis=dict(tickmode='array', ticktext=monthly_df['Month'], tickvals=monthly_df['Month']),
+                yaxis=dict(range=[0, max(monthly_data['Utilization_%'].max() + 10, 40)]),
                 hovermode='x unified',
-                height=400,
-                plot_bgcolor='white',
-                paper_bgcolor='white',
+                height=450,
                 showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                )
+                plot_bgcolor='white',
+                paper_bgcolor='white'
             )
             
-            fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-            fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+            fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#E0E0E0')
+            fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#E0E0E0')
             
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Volume comparison chart
+            st.subheader("📊 Brown vs Green Volume by Month")
+            
+            fig2 = go.Figure()
+            
+            fig2.add_trace(go.Bar(
+                x=monthly_data['Month_Name'],
+                y=monthly_data['Brown_Volume_kg'],
+                name='Brown (UPS)',
+                marker_color='#8B4513',
+                text=[format_number(x) for x in monthly_data['Brown_Volume_kg']],
+                textposition='outside'
+            ))
+            
+            fig2.add_trace(go.Bar(
+                x=monthly_data['Month_Name'],
+                y=monthly_data['Green_Volume_kg'],
+                name='Green (Others)',
+                marker_color='#2e7d32',
+                text=[format_number(x) for x in monthly_data['Green_Volume_kg']],
+                textposition='outside'
+            ))
+            
+            fig2.update_layout(
+                xaxis_title="Month",
+                yaxis_title="Volume (kg)",
+                barmode='group',
+                height=400,
+                showlegend=True,
+                plot_bgcolor='white',
+                paper_bgcolor='white'
+            )
+            
+            st.plotly_chart(fig2, use_container_width=True)
     
     with tab2:
         st.header("Regional Analysis")
         
         # Month selector
-        if 'Month' in df.columns:
-            available_months = sorted(df['Month'].dropna().unique())
-            if available_months:
-                selected_month = st.selectbox(
-                    "Select Month",
-                    available_months,
-                    format_func=lambda x: calendar.month_name[int(x)]
-                )
+        available_months = sorted(df[df['Year'] == 2024]['Month'].dropna().unique())
+        
+        if available_months:
+            selected_month = st.selectbox(
+                "Select Month for Analysis",
+                available_months,
+                format_func=lambda x: calendar.month_name[int(x)],
+                index=len(available_months)-1 if available_months else 0
+            )
+            
+            # Calculate regional metrics
+            regional_data, pair_data = calculate_regional_metrics(df, selected_month)
+            
+            # Display metrics for selected month
+            st.subheader(f"📅 Analysis for {calendar.month_name[selected_month]} 2024")
+            
+            # Summary metrics for the month
+            month_df = df[(df['Month'] == selected_month) & (df['Year'] == 2024)]
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            brown_volume = month_df[month_df['Category'] == 'Brown']['Charge Weight kg'].sum()
+            green_volume = month_df[month_df['Category'] == 'Green']['Charge Weight kg'].sum()
+            total_volume = brown_volume + green_volume
+            utilization = (brown_volume / total_volume * 100) if total_volume > 0 else 0
+            
+            with col1:
+                st.metric("Month Utilization %", f"{utilization:.1f}%")
+            with col2:
+                st.metric("Brown Volume", format_number(brown_volume))
+            with col3:
+                st.metric("Green Volume", format_number(green_volume))
+            with col4:
+                st.metric("Total Volume", format_number(total_volume))
+            
+            # Regional breakdown
+            st.subheader("🌍 By Region Lane")
+            
+            if not regional_data.empty:
+                # Prepare display
+                regional_display = regional_data[['Region Lane', 'Brown_Volume_kg', 'Green_Volume_kg',
+                                                  'Total_Volume_kg', 'Utilization_%', 'Savings',
+                                                  'Brown_Cost_per_kg', 'Green_Cost_per_kg']].copy()
                 
-                # Calculate regional metrics
-                regional_df = calculate_regional_metrics_for_month(df, selected_month)
+                # Format for display
+                regional_display['Brown_Volume_kg'] = regional_display['Brown_Volume_kg'].apply(lambda x: format_number(x))
+                regional_display['Green_Volume_kg'] = regional_display['Green_Volume_kg'].apply(lambda x: format_number(x))
+                regional_display['Total_Volume_kg'] = regional_display['Total_Volume_kg'].apply(lambda x: format_number(x))
+                regional_display['Utilization_%'] = regional_display['Utilization_%'].apply(lambda x: f"{x:.1f}%")
+                regional_display['Savings'] = regional_display['Savings'].apply(format_currency)
+                regional_display['Brown_Cost_per_kg'] = regional_display['Brown_Cost_per_kg'].apply(lambda x: f"${x:.2f}")
+                regional_display['Green_Cost_per_kg'] = regional_display['Green_Cost_per_kg'].apply(lambda x: f"${x:.2f}")
                 
-                if not regional_df.empty:
-                    # Display regional utilization table
-                    st.subheader("Utilization by Region")
-                    
-                    util_cols = ['ORIG_REGION', 'Target %', 'Actual Utilization %', '% Effective']
-                    util_display = regional_df[util_cols].copy()
-                    
-                    # Format percentages
-                    for col in ['Target %', 'Actual Utilization %', '% Effective']:
-                        util_display[col] = util_display[col].apply(lambda x: f"{x:.1f}%")
-                    
-                    st.dataframe(util_display, use_container_width=True, hide_index=True)
-                    
-                    # Display regional savings table
-                    st.subheader("Savings Impact by Region")
-                    
-                    savings_cols = ['ORIG_REGION', 'LY BT Volume', 'BT Volume', 'Actual Savings', 
-                                   'Actual Weight Impact', 'Actual Rate Impact', 'YoY Savings']
-                    savings_display = regional_df[savings_cols].copy()
-                    
-                    # Format values
-                    savings_display['LY BT Volume'] = savings_display['LY BT Volume'].apply(lambda x: format_number(x))
-                    savings_display['BT Volume'] = savings_display['BT Volume'].apply(lambda x: format_number(x))
-                    savings_display['Actual Savings'] = savings_display['Actual Savings'].apply(format_currency)
-                    savings_display['Actual Weight Impact'] = savings_display['Actual Weight Impact'].apply(lambda x: format_number(x))
-                    savings_display['Actual Rate Impact'] = savings_display['Actual Rate Impact'].apply(lambda x: f"${x:.2f}")
-                    savings_display['YoY Savings'] = savings_display['YoY Savings'].apply(format_currency)
-                    
-                    st.dataframe(savings_display, use_container_width=True, hide_index=True)
-                    
-                    # Regional visualization
-                    st.subheader("Regional Utilization Comparison")
-                    
-                    fig = go.Figure(data=[
-                        go.Bar(
-                            x=regional_df['ORIG_REGION'],
-                            y=regional_df['Actual Utilization %'],
-                            name='Actual',
-                            marker_color='#2e7d32'
-                        ),
-                        go.Bar(
-                            x=regional_df['ORIG_REGION'],
-                            y=regional_df['Target %'],
-                            name='Target',
-                            marker_color='#ff9800'
-                        )
-                    ])
-                    
-                    fig.update_layout(
-                        xaxis_title="Region",
-                        yaxis_title="Utilization %",
-                        barmode='group',
-                        height=400,
-                        plot_bgcolor='white',
-                        paper_bgcolor='white'
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No regional data available for selected month")
+                regional_display.columns = ['Region', 'Brown Volume (kg)', 'Green Volume (kg)',
+                                           'Total Volume (kg)', 'Utilization %', 'Savings ($)',
+                                           'Brown Cost/kg', 'Green Cost/kg']
+                
+                st.dataframe(regional_display, use_container_width=True, hide_index=True)
+                
+                # Regional utilization chart
+                fig3 = px.bar(regional_data.head(10), 
+                             x='Region Lane', 
+                             y='Utilization_%',
+                             title='Top 10 Regions by Utilization %',
+                             labels={'Utilization_%': 'Utilization %', 'Region Lane': 'Region'},
+                             color='Utilization_%',
+                             color_continuous_scale='RdYlGn')
+                
+                fig3.update_layout(height=400)
+                st.plotly_chart(fig3, use_container_width=True)
+            
+            # Region Pair breakdown
+            st.subheader("🔄 By Region Pair (Origin → Destination)")
+            
+            if not pair_data.empty:
+                # Show top 15 pairs
+                pair_display = pair_data.head(15)[['Region_Pair', 'Brown_Volume_kg', 'Green_Volume_kg',
+                                                   'Total_Volume_kg', 'Utilization_%', 'Savings',
+                                                   'Brown_Cost_per_kg', 'Green_Cost_per_kg']].copy()
+                
+                # Format for display
+                pair_display['Brown_Volume_kg'] = pair_display['Brown_Volume_kg'].apply(lambda x: format_number(x))
+                pair_display['Green_Volume_kg'] = pair_display['Green_Volume_kg'].apply(lambda x: format_number(x))
+                pair_display['Total_Volume_kg'] = pair_display['Total_Volume_kg'].apply(lambda x: format_number(x))
+                pair_display['Utilization_%'] = pair_display['Utilization_%'].apply(lambda x: f"{x:.1f}%")
+                pair_display['Savings'] = pair_display['Savings'].apply(format_currency)
+                pair_display['Brown_Cost_per_kg'] = pair_display['Brown_Cost_per_kg'].apply(lambda x: f"${x:.2f}")
+                pair_display['Green_Cost_per_kg'] = pair_display['Green_Cost_per_kg'].apply(lambda x: f"${x:.2f}")
+                
+                pair_display.columns = ['Route', 'Brown Volume (kg)', 'Green Volume (kg)',
+                                       'Total Volume (kg)', 'Utilization %', 'Savings ($)',
+                                       'Brown Cost/kg', 'Green Cost/kg']
+                
+                st.dataframe(pair_display, use_container_width=True, hide_index=True)
+                
+                # Top routes visualization
+                fig4 = px.bar(pair_data.head(10), 
+                             x='Total_Volume_kg', 
+                             y='Region_Pair',
+                             orientation='h',
+                             title='Top 10 Routes by Total Volume',
+                             labels={'Total_Volume_kg': 'Total Volume (kg)', 'Region_Pair': 'Route'},
+                             color='Utilization_%',
+                             color_continuous_scale='RdYlGn')
+                
+                fig4.update_layout(height=400)
+                st.plotly_chart(fig4, use_container_width=True)
         else:
-            st.warning("Date information not available in the data")
-    
-    # Sidebar information
-    with st.sidebar:
-        if not df.empty:
-            st.header("📈 Data Summary")
-            st.metric("Total Records", f"{len(df):,}")
-            st.metric("Brown (UPS) Records", f"{len(df[df['Category'] == 'Brown']):,}")
-            st.metric("Green (Other) Records", f"{len(df[df['Category'] == 'Green']):,}")
-            
-            if 'OriginDeparture Date' in df.columns:
-                date_range = df['OriginDeparture Date'].dropna()
-                if not date_range.empty:
-                    st.metric("Date Range", 
-                             f"{date_range.min().strftime('%b %Y')} - {date_range.max().strftime('%b %Y')}")
-            
-            st.header("⚙️ Configuration Note")
-            st.info("""
-            **Important**: Update the `ups_carriers` list in the code with your actual UPS carrier names.
-            
-            Currently using the largest carrier as proxy for Brown (UPS) volumes.
-            """)
+            st.warning("No data available for 2024")
 
 if __name__ == "__main__":
     main()
