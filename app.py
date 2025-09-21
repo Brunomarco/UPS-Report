@@ -5,6 +5,7 @@ import plotly.express as px
 from datetime import datetime
 import numpy as np
 import calendar
+import io
 
 # Page configuration
 st.set_page_config(
@@ -46,15 +47,19 @@ st.markdown("""
         padding: 10px 20px;
         font-weight: 600;
     }
+    
+    .uploadedFile {
+        display: none;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 @st.cache_data
-def load_data():
+def load_data(uploaded_file):
     """Load and process the Excel data"""
     try:
         # Load the Excel file
-        df = pd.read_excel('MNX GLOBAL AF ACTIVITY 2024 V2.xlsx')
+        df = pd.read_excel(uploaded_file)
         
         # Parse the date column (M/D/YYYY format)
         df['OriginDeparture Date'] = pd.to_datetime(df['OriginDeparture Date'], format='%m/%d/%Y', errors='coerce')
@@ -66,19 +71,21 @@ def load_data():
         df['Month_Year'] = df['OriginDeparture Date'].dt.strftime('%Y-%m')
         
         # Define UPS/Brown carriers
-        # IMPORTANT: Update this list with actual UPS carrier names if they exist in your data
-        ups_carriers = ['UPS', 'United Parcel Service', 'UPS Airlines']
+        # IMPORTANT: Update this list with actual UPS carrier names from your data
+        ups_carriers = ['UPS', 'United Parcel Service', 'UPS Airlines', 'UPS SCS']
         
         # Check if any UPS carriers exist in the data
         actual_ups = [c for c in ups_carriers if c in df['Airline'].unique()]
         
         if not actual_ups:
-            # If no UPS found, you can specify which airlines to treat as "Brown"
-            # For demo, let's use DHL as Brown (you should change this)
-            brown_carriers = ['DHL AERO EXPRESO SA', 'DHL AMS', 'DHL AUSTRALIA']
-            st.sidebar.warning("⚠️ No UPS found in data. Using DHL carriers as Brown for demo. Please update the code with actual UPS carrier names.")
+            # If no UPS found, use specific carriers as Brown for demo
+            # YOU SHOULD UPDATE THIS LIST with carriers that should be considered as "Brown"
+            brown_carriers = ['DHL AERO EXPRESO SA', 'DHL AMS', 'DHL AUSTRALIA', 
+                            'DHL AVIATION  EUROPEAN', 'EUROPEAN AIR TRANSPORT DHLHW']
+            st.sidebar.warning("⚠️ No 'UPS' found in airline names. Using DHL carriers as Brown for demo. Update the code with actual UPS carrier names.")
         else:
             brown_carriers = actual_ups
+            st.sidebar.success(f"✅ Found UPS carriers: {', '.join(actual_ups)}")
         
         # Categorize as Brown (UPS) or Green (all others)
         df['Is_Brown'] = df['Airline'].isin(brown_carriers)
@@ -91,6 +98,9 @@ def load_data():
         
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
+        st.error("Please make sure your Excel file has the following columns:")
+        st.error("- Airline, Charge Weight kg, Air COGS, OriginDeparture Date")
+        st.error("- Origin Region , Destination Region, Region Lane")
         return pd.DataFrame(), []
 
 def calculate_monthly_metrics(df):
@@ -99,8 +109,8 @@ def calculate_monthly_metrics(df):
     df_2024 = df[df['Year'] == 2024].copy()
     
     if df_2024.empty:
-        st.warning("No data found for 2024")
-        return pd.DataFrame()
+        st.warning("No data found for 2024. Showing all available data.")
+        df_2024 = df.copy()
     
     # Group by month and category
     monthly_metrics = df_2024.groupby(['Month', 'Month_Name', 'Category']).agg({
@@ -146,8 +156,8 @@ def calculate_monthly_metrics(df):
     )
     
     # Add costs
-    result['Brown_Cost'] = pivot_cost.get('Brown', 0)
-    result['Green_Cost'] = pivot_cost.get('Green', 0)
+    result['Brown_Cost'] = pivot_cost.get('Brown', 0) if 'Brown' in pivot_cost.columns else 0
+    result['Green_Cost'] = pivot_cost.get('Green', 0) if 'Green' in pivot_cost.columns else 0
     
     # Calculate cost per kg
     result['Brown_Cost_per_kg'] = np.where(
@@ -163,7 +173,6 @@ def calculate_monthly_metrics(df):
     )
     
     # Calculate savings (assuming commercial rate is 20% higher than UPS rate)
-    # Adjust this formula based on your actual commercial rates
     result['Commercial_Cost'] = result['Brown_Cost'] * 1.2
     result['Savings'] = result['Commercial_Cost'] - result['Brown_Cost']
     
@@ -173,6 +182,10 @@ def calculate_regional_metrics(df, selected_month):
     """Calculate metrics by region for a specific month"""
     # Filter for selected month and year 2024
     df_month = df[(df['Month'] == selected_month) & (df['Year'] == 2024)].copy()
+    
+    if df_month.empty:
+        # Try without year filter
+        df_month = df[df['Month'] == selected_month].copy()
     
     if df_month.empty:
         return pd.DataFrame(), pd.DataFrame()
@@ -216,8 +229,8 @@ def calculate_regional_metrics(df, selected_month):
     )
     
     # Add costs
-    region_result['Brown_Cost'] = pivot_region_cost.get('Brown', 0)
-    region_result['Green_Cost'] = pivot_region_cost.get('Green', 0)
+    region_result['Brown_Cost'] = pivot_region_cost.get('Brown', 0) if 'Brown' in pivot_region_cost.columns else 0
+    region_result['Green_Cost'] = pivot_region_cost.get('Green', 0) if 'Green' in pivot_region_cost.columns else 0
     
     # Cost per kg
     region_result['Brown_Cost_per_kg'] = np.where(
@@ -275,8 +288,8 @@ def calculate_regional_metrics(df, selected_month):
     )
     
     # Add costs
-    pair_result['Brown_Cost'] = pivot_pair_cost.get('Brown', 0)
-    pair_result['Green_Cost'] = pivot_pair_cost.get('Green', 0)
+    pair_result['Brown_Cost'] = pivot_pair_cost.get('Brown', 0) if 'Brown' in pivot_pair_cost.columns else 0
+    pair_result['Green_Cost'] = pivot_pair_cost.get('Green', 0) if 'Green' in pivot_pair_cost.columns else 0
     
     # Cost per kg
     pair_result['Brown_Cost_per_kg'] = np.where(
@@ -326,35 +339,73 @@ def main():
     st.markdown('<h1 style="color: #2e7d32;">Green to Brown Monthly Utilization Stats</h1>', 
                 unsafe_allow_html=True)
     
+    # File uploader
+    uploaded_file = st.file_uploader(
+        "📁 Upload MNX GLOBAL AF ACTIVITY Excel File",
+        type=['xlsx', 'xls'],
+        help="Upload your MNX GLOBAL AF ACTIVITY 2024 V2.xlsx file"
+    )
+    
+    if uploaded_file is None:
+        st.info("👆 Please upload your Excel file to begin analysis")
+        st.markdown("""
+        ### Expected File Format:
+        The Excel file should contain the following columns:
+        - **Airline**: Name of the carrier
+        - **Charge Weight kg**: Weight in kilograms (Column S)
+        - **Air COGS**: Air cost of goods sold (Column T)
+        - **OriginDeparture Date**: Date in M/D/YYYY format
+        - **Origin Region**: Origin region
+        - **Destination Region**: Destination region
+        - **Region Lane**: Combined region information
+        """)
+        return
+    
     # Load data
-    with st.spinner('Loading data...'):
-        df, brown_carriers = load_data()
+    with st.spinner('Loading and processing data... This may take a moment for large files.'):
+        df, brown_carriers = load_data(uploaded_file)
     
     if df.empty:
-        st.error("Failed to load data. Please ensure 'MNX GLOBAL AF ACTIVITY 2024 V2.xlsx' is in the same directory.")
         return
     
     # Sidebar info
     with st.sidebar:
         st.header("📊 Dashboard Info")
+        st.success(f"✅ File loaded successfully!")
         st.info(f"""
-        **Data Loaded:**
+        **Data Summary:**
         - Total Records: {len(df):,}
-        - Year 2024 Records: {len(df[df['Year'] == 2024]):,}
+        - Date Range: {df['OriginDeparture Date'].min().strftime('%b %Y') if pd.notna(df['OriginDeparture Date'].min()) else 'N/A'} to {df['OriginDeparture Date'].max().strftime('%b %Y') if pd.notna(df['OriginDeparture Date'].max()) else 'N/A'}
         
         **Categories:**
         - Brown (UPS): {len(df[df['Category'] == 'Brown']):,} records
         - Green (Others): {len(df[df['Category'] == 'Green']):,} records
         
-        **Current Brown Carriers:**
-        {', '.join(brown_carriers[:3])}{'...' if len(brown_carriers) > 3 else ''}
+        **Brown Carriers Identified:**
+        {chr(10).join(['• ' + c for c in brown_carriers[:5]])}{'...' if len(brown_carriers) > 5 else ''}
         """)
         
-        st.warning("""
-        ⚠️ **Configuration Note:**
+        st.divider()
         
-        If UPS is not in your data, update the `ups_carriers` list in the code with the actual UPS carrier names from your Excel file.
-        """)
+        # Add configuration section
+        st.header("⚙️ Configuration")
+        
+        # Allow user to specify UPS carriers
+        st.markdown("**Specify UPS/Brown Carriers:**")
+        user_ups_carriers = st.text_area(
+            "Enter carrier names (one per line):",
+            value='\n'.join(brown_carriers[:3]) if brown_carriers else "UPS\nUnited Parcel Service",
+            height=100,
+            help="Enter the exact airline names that should be considered as Brown (UPS)"
+        )
+        
+        if st.button("Update Carriers"):
+            # Update the categorization based on user input
+            new_brown_carriers = [c.strip() for c in user_ups_carriers.split('\n') if c.strip()]
+            df['Is_Brown'] = df['Airline'].isin(new_brown_carriers)
+            df['Category'] = df['Is_Brown'].map({True: 'Brown', False: 'Green'})
+            st.success(f"Updated! Brown carriers: {', '.join(new_brown_carriers[:3])}...")
+            st.rerun()
     
     # Create tabs
     tab1, tab2 = st.tabs(["📅 Monthly Overview", "🌍 Regional Analysis"])
@@ -418,6 +469,15 @@ def main():
                                   'Brown Cost/kg', 'Green Cost/kg']
             
             st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            # Download button for the table
+            csv = display_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Monthly Metrics as CSV",
+                data=csv,
+                file_name=f"monthly_metrics_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
             
             # Utilization Chart
             st.subheader("📈 Monthly Utilization % Trend")
@@ -495,6 +555,8 @@ def main():
             )
             
             st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.warning("No monthly data available to display")
     
     with tab2:
         st.header("Regional Analysis")
@@ -502,11 +564,14 @@ def main():
         # Month selector
         available_months = sorted(df[df['Year'] == 2024]['Month'].dropna().unique())
         
+        if not available_months:
+            available_months = sorted(df['Month'].dropna().unique())
+        
         if available_months:
             selected_month = st.selectbox(
                 "Select Month for Analysis",
                 available_months,
-                format_func=lambda x: calendar.month_name[int(x)],
+                format_func=lambda x: calendar.month_name[int(x)] if pd.notna(x) else 'Unknown',
                 index=len(available_months)-1 if available_months else 0
             )
             
@@ -518,6 +583,8 @@ def main():
             
             # Summary metrics for the month
             month_df = df[(df['Month'] == selected_month) & (df['Year'] == 2024)]
+            if month_df.empty:
+                month_df = df[df['Month'] == selected_month]
             
             col1, col2, col3, col4 = st.columns(4)
             
@@ -570,6 +637,8 @@ def main():
                 
                 fig3.update_layout(height=400)
                 st.plotly_chart(fig3, use_container_width=True)
+            else:
+                st.info("No regional data available for the selected month")
             
             # Region Pair breakdown
             st.subheader("🔄 By Region Pair (Origin → Destination)")
@@ -607,8 +676,10 @@ def main():
                 
                 fig4.update_layout(height=400)
                 st.plotly_chart(fig4, use_container_width=True)
+            else:
+                st.info("No region pair data available for the selected month")
         else:
-            st.warning("No data available for 2024")
+            st.warning("No data available with valid months")
 
 if __name__ == "__main__":
     main()
