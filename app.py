@@ -9,340 +9,513 @@ warnings.filterwarnings("ignore")
 
 # ==================== PAGE & CSS ====================
 st.set_page_config(page_title="Green to Brown Utilization Stats", layout="wide", page_icon="✈️")
+
+# Custom CSS for matching the design
 st.markdown("""
 <style>
-.main { padding:0rem 1rem; }
-h1 { color:#333; font-size:2.5rem; font-weight:600; }
-.stTabs [data-baseweb="tab-list"]{ gap:2rem; }
-.stTabs [data-baseweb="tab"]{ height:50px; padding:0 20px; font-size:1.1rem; font-weight:500; }
-div[data-testid="metric-container"]{
-  background:#f5f5f5; border:1px solid #e0e0e0; padding:1rem; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.05);
+.main { padding: 0rem 1rem; }
+h1 { color: #333; font-size: 2.5rem; font-weight: 600; }
+.stTabs [data-baseweb="tab-list"] { gap: 2rem; }
+.stTabs [data-baseweb="tab"] { 
+    height: 50px; 
+    padding: 0 20px; 
+    font-size: 1.1rem; 
+    font-weight: 500; 
 }
-.brown { color:#8B4513; font-weight:700; }
-.green { color:#228B22; font-weight:700; }
+div[data-testid="metric-container"] {
+    background: #f5f5f5; 
+    border: 1px solid #e0e0e0; 
+    padding: 1rem; 
+    border-radius: 8px; 
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+.metric-value { font-size: 1.8rem; font-weight: 600; }
+.brown-text { color: #8B4513; font-weight: 700; }
+.green-text { color: #228B22; font-weight: 700; }
+.header-title { 
+    text-align: center; 
+    margin-bottom: 2rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== IATA → REGION MAPPING ====================
-EUROPE_CODES = {
-    "AMS","CDG","ORY","FRA","MUC","DUS","BER","HAM","CGN","BRU","LGG","LHR","LGW","STN","LTN","MAN","BHX","EDI",
-    "DUB","MAD","BCN","VLC","AGP","PMI","LIS","OPO","MXP","LIN","FCO","VCE","ATH","ZRH","GVA","VIE","PRG","WAW",
-    "KRK","OSL","CPH","ARN","HEL","RIX","TLL","VNO","BUD","BEG","OTP","SOF","SKG","IST"
-}
-NORTH_AMERICA_CODES = {"JFK","EWR","BOS","PHL","IAD","DCA","CLT","ATL","MIA","MCO","TPA","DFW","IAH","ORD","MDW","MSP","DTW","LAX","SFO","SEA","PHX","SAN","LAS","YYZ","YUL","YVR","YYC","YOW","YEG"}
-LATIN_AMERICA_CODES = {"MEX","GDL","MTY","BOG","MDE","LIM","SCL","EZE","GRU","GIG","GUA","PTY","SJO","SAL","SDQ"}
-APAC_CODES = {"HKG","SIN","BKK","KUL","CGK","SGN","HAN","TPE","NRT","HND","KIX","CTS","ICN","GMP","PVG","SHA","PEK","PKX","CAN","SZX","SYD","MEL","AKL","DEL","BOM","BLR","MAA"}
-ISMEA_CODES = {"DXB","DWC","AUH","DOH","BAH","KWI","MCT","AMM","BEY","JED","RUH","DMM","IKA","THR","KHI","LHE","ISB","CMB","DAC","KTM"}
-
-def iata_to_region(code: str) -> str:
-    if not isinstance(code, str) or len(code) < 3:
+# ==================== REGION MAPPING ====================
+def get_region_from_iata(code: str) -> str:
+    """Map IATA codes to regions"""
+    if not isinstance(code, str) or len(code) != 3:
         return "OTHER"
-    c = code.strip().upper()
-    if c in EUROPE_CODES: return "EUROPE"
-    if c in NORTH_AMERICA_CODES: return "NORTH AMERICA"
-    if c in LATIN_AMERICA_CODES: return "LATIN AMERICA"
-    if c in APAC_CODES: return "APAC"
-    if c in ISMEA_CODES: return "ISMEA"
-    return "OTHER"
+    
+    code = code.strip().upper()
+    
+    # Europe codes
+    EUROPE = {
+        "AMS", "CDG", "ORY", "FRA", "MUC", "DUS", "BER", "HAM", "CGN", "BRU", "LGG",
+        "LHR", "LGW", "STN", "LTN", "MAN", "BHX", "EDI", "GLA", "DUB", "ORK", "SNN",
+        "MAD", "BCN", "VLC", "AGP", "PMI", "IBZ", "LIS", "OPO", "FAO",
+        "MXP", "LIN", "FCO", "VCE", "NAP", "BLQ", "FLR", "PSA",
+        "ATH", "SKG", "HER", "ZRH", "GVA", "BSL", "VIE", "SZG",
+        "PRG", "BTS", "WAW", "KRK", "GDN", "OSL", "BGO", "TRD",
+        "CPH", "BLL", "ARN", "GOT", "MMX", "HEL", "TKU", "OUL",
+        "RIX", "TLL", "VNO", "BUD", "BEG", "ZAG", "LJU", "SKP",
+        "OTP", "TSR", "SOF", "VAR", "IST", "SAW", "ESB", "AYT"
+    }
+    
+    # Americas codes
+    AMERICAS = {
+        # USA
+        "JFK", "EWR", "LGA", "BOS", "PHL", "IAD", "DCA", "BWI", "CLT", "RDU",
+        "ATL", "MIA", "MCO", "TPA", "FLL", "RSW", "PBI", "JAX", "MSY", "IAH",
+        "DFW", "AUS", "SAT", "ORD", "MDW", "DTW", "MSP", "STL", "MCI", "MKE",
+        "CLE", "CVG", "CMH", "IND", "PIT", "BUF", "BNA", "MEM", "SDF",
+        "DEN", "PHX", "LAS", "SLC", "ABQ", "LAX", "SFO", "SJC", "OAK", "SAN",
+        "SEA", "PDX", "ANC", "HNL", "OGG",
+        # Canada
+        "YYZ", "YUL", "YVR", "YYC", "YOW", "YEG", "YWG", "YHZ",
+        # Mexico & Central America
+        "MEX", "GDL", "MTY", "CUN", "SJD", "PVR", "GUA", "SAL", "TGU", "MGA",
+        "PTY", "SJO", "LIR",
+        # Caribbean
+        "SJU", "STT", "STX", "HAV", "SDQ", "PUJ", "POP", "KIN", "MBJ", "NAS",
+        "GCM", "BGI", "POS",
+        # South America
+        "BOG", "MDE", "CLO", "UIO", "GYE", "LIM", "CUZ", "LPB", "VVI", "CCS",
+        "CRB", "GEO", "PBM", "SCL", "EZE", "AEP", "COR", "MDZ", "GRU", "GIG",
+        "BSB", "CNF", "SSA", "REC", "FOR", "MAO", "MVD", "ASU", "CAY"
+    }
+    
+    # APAC codes
+    APAC = {
+        # East Asia
+        "HKG", "PVG", "SHA", "PEK", "PKX", "CAN", "SZX", "XIY", "CTU", "CKG",
+        "WUH", "NKG", "HGH", "XMN", "FOC", "TAO", "DLC", "TSN", "SHE", "HAK",
+        "NRT", "HND", "KIX", "ITM", "NGO", "FUK", "CTS", "OKA", "ICN", "GMP",
+        "PUS", "CJU", "TPE", "KHH", "TSA",
+        # Southeast Asia
+        "SIN", "KUL", "PEN", "LGK", "BKI", "KCH", "BKK", "DMK", "HKT", "CNX",
+        "SGN", "HAN", "DAD", "CXR", "PNH", "REP", "VTE", "RGN", "MDL",
+        "MNL", "CEB", "DVO", "CGK", "SUB", "DPS", "BDO", "PKU", "MES",
+        # South Asia
+        "DEL", "BOM", "MAA", "BLR", "HYD", "CCU", "COK", "AMD", "GOI", "ATQ",
+        "CMB", "DAC", "KTM", "ISB", "KHI", "LHE", "MLE",
+        # Oceania
+        "SYD", "MEL", "BNE", "PER", "ADL", "OOL", "CNS", "DRW", "AKL", "WLG",
+        "CHC", "ZQN", "NAN", "APW", "POM", "GUM", "SPN"
+    }
+    
+    # ISMEA codes (India, Middle East, Africa)
+    ISMEA = {
+        # Middle East
+        "DXB", "DWC", "AUH", "SHJ", "DOH", "KWI", "BAH", "MCT", "RUH", "JED",
+        "DMM", "AMM", "BEY", "TLV", "CAI", "HRG", "SSH", "LXR", "ASW",
+        # Africa
+        "JNB", "CPT", "DUR", "PLZ", "GBE", "WDH", "MPM", "LAD", "LUN", "HRE",
+        "NBO", "MBA", "KGL", "EBB", "DAR", "ZNZ", "ADD", "ABJ", "ACC", "LOS",
+        "ABV", "PHC", "DKR", "CMN", "RAK", "TUN", "ALG", "ORN"
+    }
+    
+    # LATIN AMERICA codes (separate from Americas for more granular analysis)
+    LATAM = {
+        "MEX", "GDL", "MTY", "CUN", "GUA", "SAL", "TGU", "PTY", "SJO",
+        "BOG", "MDE", "CLO", "UIO", "LIM", "CUZ", "LPB", "SCL", "EZE", "GRU",
+        "GIG", "BSB", "CCS", "MVD", "ASU"
+    }
+    
+    if code in EUROPE:
+        return "EUROPE"
+    elif code in AMERICAS:
+        return "AMERICAS"
+    elif code in APAC:
+        return "APAC"
+    elif code in ISMEA:
+        return "ISMEA"
+    elif code in LATAM:
+        return "LATIN AMERICA"
+    else:
+        return "OTHER"
 
-MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
-
-# ==================== LOAD DATA (fast & memory-safe) ====================
+# ==================== DATA LOADING ====================
 @st.cache_data(show_spinner=False)
-def load_data_from_bytes(xlsx_bytes: bytes) -> pd.DataFrame:
-    """
-    Reads only the required columns, converts heavy text to category, and builds
-    helper columns. Cached by file bytes to avoid re-parsing.
-    """
-    bio = BytesIO(xlsx_bytes)
-    xls = pd.ExcelFile(bio)
-    sheet = "Export" if "Export" in xls.sheet_names else xls.sheet_names[0]
-
-    # Columns we use
-    needed = ["POB as text","Airline","Volumetric Weight (KG)","Origin IATA","Destination IATA"]
-
-    # Detect available needed columns from headers
-    hdr = pd.read_excel(BytesIO(xlsx_bytes), sheet_name=sheet, nrows=0, engine="openpyxl")
-    usecols = [c for c in hdr.columns if c in needed]
-
-    df = pd.read_excel(BytesIO(xlsx_bytes), sheet_name=sheet, usecols=usecols or None, engine="openpyxl")
-    df.columns = df.columns.str.strip()
-
-    # Must have POB as text and Airline
-    if "POB as text" not in df.columns or "Airline" not in df.columns:
+def load_data_optimized(file_bytes: bytes) -> pd.DataFrame:
+    """Load and process Excel data efficiently for large files"""
+    
+    # Read Excel with minimal columns - only what we need
+    # Columns: A (POB as text), E (Airline), F (Volumetric Weight), L (Origin IATA), M (Destination IATA)
+    usecols = [0, 4, 5, 11, 12]  # Column indices for A, E, F, L, M
+    
+    try:
+        df = pd.read_excel(
+            BytesIO(file_bytes),
+            usecols=usecols,
+            engine='openpyxl'
+        )
+        
+        # Rename columns based on expected positions
+        df.columns = ['POB as text', 'Airline', 'Volumetric Weight (KG)', 'Origin IATA', 'Destination IATA']
+        
+    except Exception as e:
+        st.error(f"Error reading file: {str(e)}")
         return pd.DataFrame()
-
-    # Filter rows: require date & airline (non-empty)
-    df["Airline"] = df["Airline"].astype("string").str.strip()
-    df = df[df["Airline"].notna() & (df["Airline"] != "")]
-    df["Date"] = pd.to_datetime(df["POB as text"], errors="coerce", infer_datetime_format=True)
-    df = df[df["Date"].notna()]
-
-    # Date parts
-    df["Year"]  = df["Date"].dt.year.astype("int16")
-    df["Month"] = df["Date"].dt.month.astype("int8")
-
-    # Weight
-    if "Volumetric Weight (KG)" in df.columns:
-        df["Weight_KG"] = pd.to_numeric(df["Volumetric Weight (KG)"], errors="coerce").fillna(0.0).astype("float32")
-    else:
-        df["Weight_KG"] = np.zeros(len(df), dtype="float32")
-
-    # Brown vs Green
-    df["Is_UPS"] = df["Airline"].str.upper().str.contains("UPS", na=False).astype("bool")
-
-    # IATA to Region + Lane
-    if "Origin IATA" in df.columns and "Destination IATA" in df.columns:
-        df["Origin IATA"] = df["Origin IATA"].astype("string").str.upper().astype("category")
-        df["Destination IATA"] = df["Destination IATA"].astype("string").str.upper().astype("category")
-
-        df["Origin Region"] = df["Origin IATA"].astype(str).map(iata_to_region).astype("category")
-        df["Destination Region"] = df["Destination IATA"].astype(str).map(iata_to_region).astype("category")
-
-        # FIXED: use pandas where (not np.where) so casting to category is valid
-        df["Region Family"] = df["Origin Region"].astype(str).where(
-            df["Origin Region"] == df["Destination Region"],
-            "CROSS-REGION"
-        ).astype("category")
-
-        df["Lane"] = (df["Origin IATA"].astype(str) + "-" + df["Destination IATA"].astype(str)).astype("category")
-    else:
-        df["Origin Region"] = pd.Categorical(["OTHER"] * len(df))
-        df["Destination Region"] = pd.Categorical(["OTHER"] * len(df))
-        df["Region Family"] = pd.Categorical(["OTHER"] * len(df))
-        df["Lane"] = pd.Categorical(["UNKNOWN-UNKNOWN"] * len(df))
-
-    # Big memory win
-    df["Airline"] = df["Airline"].astype("category")
-
+    
+    # Clean and filter data
+    df = df.dropna(subset=['POB as text', 'Airline'])
+    df['Airline'] = df['Airline'].astype(str).str.strip()
+    df = df[df['Airline'] != '']
+    
+    # Parse dates
+    df['Date'] = pd.to_datetime(df['POB as text'], errors='coerce')
+    df = df.dropna(subset=['Date'])
+    
+    # Extract date components
+    df['Year'] = df['Date'].dt.year
+    df['Month'] = df['Date'].dt.month
+    df['Month_Name'] = df['Date'].dt.strftime('%B')
+    
+    # Process weight - handle missing values
+    df['Weight_KG'] = pd.to_numeric(df['Volumetric Weight (KG)'], errors='coerce').fillna(0)
+    
+    # Identify UPS Airlines (Brown) vs Others (Green)
+    df['Is_Brown'] = df['Airline'].str.upper().str.contains('UPS', na=False)
+    df['Category'] = df['Is_Brown'].map({True: 'Brown', False: 'Green'})
+    
+    # Process IATA codes and regions
+    df['Origin IATA'] = df['Origin IATA'].astype(str).str.strip().str.upper()
+    df['Destination IATA'] = df['Destination IATA'].astype(str).str.strip().str.upper()
+    
+    # Map to regions
+    df['Origin Region'] = df['Origin IATA'].apply(get_region_from_iata)
+    df['Destination Region'] = df['Destination IATA'].apply(get_region_from_iata)
+    
+    # Create region family (same region or cross-region)
+    df['Region Family'] = df.apply(
+        lambda x: x['Origin Region'] if x['Origin Region'] == x['Destination Region'] else 'CROSS-REGION',
+        axis=1
+    )
+    
+    # Create lanes
+    df['Lane'] = df['Origin IATA'] + '-' + df['Destination IATA']
+    
     return df
 
-# ==================== AGG HELPERS (vectorized) ====================
-def build_monthly_table(df_year: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    """
-    Returns (display_table, util_series_by_month).
-    Table rows = metrics, columns = months + Total.
-    """
-    g = (df_year
-         .groupby(["Month","Is_UPS"], observed=True)
-         .agg(Shipments=("Airline","size"),
-              KG=("Weight_KG","sum"))
-         .reset_index())
-
-    ship = g.pivot(index="Month", columns="Is_UPS", values="Shipments").fillna(0).rename(columns={True:"Brown", False:"Green"})
-    kg   = g.pivot(index="Month", columns="Is_UPS", values="KG").fillna(0).rename(columns={True:"Brown", False:"Green"})
-
-    ship = ship.reindex(range(1,13), fill_value=0)
-    kg   = kg.reindex(range(1,13), fill_value=0.0)
-
-    util = (ship["Brown"] / (ship["Brown"] + ship["Green"]).replace(0, np.nan) * 100).fillna(0.0)
-
-    out = pd.DataFrame({"Metric": ["Brown Volume (#)","Green Volume (#)","Brown KG","Green KG","Utilization %"]})
-    for m in range(1,13):
-        out[MONTH_NAMES[m-1]] = [
-            f"{int(ship.loc[m,'Brown']):,}",
-            f"{int(ship.loc[m,'Green']):,}",
-            f"{kg.loc[m,'Brown']:,.0f}",
-            f"{kg.loc[m,'Green']:,.0f}",
-            f"{util.loc[m]:.1f}%"
-        ]
-
-    tot_brown_v = int(ship["Brown"].sum())
-    tot_green_v = int(ship["Green"].sum())
-    tot_brown_kg = float(kg["Brown"].sum())
-    tot_green_kg = float(kg["Green"].sum())
-    tot_util = (tot_brown_v / (tot_brown_v + tot_green_v) * 100) if (tot_brown_v + tot_green_v) > 0 else 0.0
-
-    out["Total"] = [
-        f"{tot_brown_v:,}",
-        f"{tot_green_v:,}",
-        f"{tot_brown_kg:,.0f}",
-        f"{tot_green_kg:,.0f}",
-        f"{tot_util:.1f}%"
-    ]
-    return out, util.reindex(range(1,13), fill_value=0.0)
-
-def kpi_for_slice(df_slice: pd.DataFrame):
-    g = (df_slice.groupby("Is_UPS", observed=True)
-         .agg(Shipments=("Airline","size"), KG=("Weight_KG","sum"))
-         .reindex([True, False], fill_value=0))
-    brown_v = int(g.loc[True, "Shipments"]) if True in g.index else 0
-    green_v = int(g.loc[False, "Shipments"]) if False in g.index else 0
-    tot_v = brown_v + green_v
-    util = (brown_v / tot_v * 100.0) if tot_v > 0 else 0.0
-    brown_kg = float(g.loc[True, "KG"]) if True in g.index else 0.0
-    green_kg = float(g.loc[False, "KG"]) if False in g.index else 0.0
-    return brown_v, green_v, tot_v, util, brown_kg, green_kg
-
-# ==================== CHART ====================
-def utilization_chart(month_names, values):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=month_names, y=values, mode="lines+markers",
-        name="Utilization %", line=dict(color="#FF6B35", width=3),
-        marker=dict(size=10),
-        text=[f"{v:.1f}%" for v in values], textposition="top center",
-        hovertemplate="%{x}<br>Utilization: %{y:.1f}%<extra></extra>"
-    ))
-    fig.update_layout(
-        title="BT Utilization % by Month and Year",
-        xaxis_title="Month",
-        yaxis_title="%",
-        yaxis=dict(range=[0,100], showgrid=True, gridcolor="#E0E0E0"),
-        xaxis=dict(showgrid=False),
-        height=400, hovermode="x", showlegend=False,
-        plot_bgcolor="white", paper_bgcolor="white"
+# ==================== CALCULATION FUNCTIONS ====================
+def calculate_monthly_stats(df: pd.DataFrame, year: int) -> pd.DataFrame:
+    """Calculate monthly statistics for the given year"""
+    
+    df_year = df[df['Year'] == year].copy()
+    
+    # Group by month and category
+    monthly = df_year.groupby(['Month', 'Month_Name', 'Category']).agg({
+        'Airline': 'count',  # Volume (number of shipments)
+        'Weight_KG': 'sum'    # Total weight
+    }).rename(columns={'Airline': 'Volume'}).reset_index()
+    
+    # Pivot for easier calculation
+    volume_pivot = monthly.pivot_table(
+        index=['Month', 'Month_Name'],
+        columns='Category',
+        values='Volume',
+        fill_value=0
+    ).reset_index()
+    
+    weight_pivot = monthly.pivot_table(
+        index=['Month', 'Month_Name'],
+        columns='Category',
+        values='Weight_KG',
+        fill_value=0
+    ).reset_index()
+    
+    # Ensure we have both Brown and Green columns
+    for col in ['Brown', 'Green']:
+        if col not in volume_pivot.columns:
+            volume_pivot[col] = 0
+        if col not in weight_pivot.columns:
+            weight_pivot[col] = 0
+    
+    # Calculate utilization
+    volume_pivot['Total_Volume'] = volume_pivot['Brown'] + volume_pivot['Green']
+    volume_pivot['Utilization_%'] = (volume_pivot['Brown'] / volume_pivot['Total_Volume'] * 100).fillna(0)
+    
+    # Merge weight data
+    result = volume_pivot.merge(
+        weight_pivot[['Month', 'Brown', 'Green']],
+        on='Month',
+        suffixes=('_Volume', '_Weight')
     )
+    
+    # Calculate totals
+    totals = pd.DataFrame({
+        'Month': [13],
+        'Month_Name': ['Total'],
+        'Brown_Volume': [result['Brown_Volume'].sum()],
+        'Green_Volume': [result['Green_Volume'].sum()],
+        'Total_Volume': [result['Total_Volume'].sum()],
+        'Brown_Weight': [result['Brown_Weight'].sum()],
+        'Green_Weight': [result['Green_Weight'].sum()],
+        'Utilization_%': [0]  # Will calculate separately
+    })
+    
+    if totals['Total_Volume'].iloc[0] > 0:
+        totals['Utilization_%'] = (totals['Brown_Volume'] / totals['Total_Volume'] * 100).iloc[0]
+    
+    result = pd.concat([result, totals], ignore_index=True)
+    
+    return result
+
+def calculate_region_stats(df: pd.DataFrame, selected_month: int = None) -> pd.DataFrame:
+    """Calculate statistics by region"""
+    
+    if selected_month:
+        df_filtered = df[df['Month'] == selected_month].copy()
+    else:
+        df_filtered = df.copy()
+    
+    # Group by region family and category
+    region_stats = df_filtered.groupby(['Region Family', 'Category']).agg({
+        'Airline': 'count',
+        'Weight_KG': 'sum'
+    }).rename(columns={'Airline': 'Volume'}).reset_index()
+    
+    # Pivot for easier calculation
+    volume_pivot = region_stats.pivot_table(
+        index='Region Family',
+        columns='Category',
+        values='Volume',
+        fill_value=0
+    )
+    
+    weight_pivot = region_stats.pivot_table(
+        index='Region Family',
+        columns='Category',
+        values='Weight_KG',
+        fill_value=0
+    )
+    
+    # Ensure columns exist
+    for col in ['Brown', 'Green']:
+        if col not in volume_pivot.columns:
+            volume_pivot[col] = 0
+        if col not in weight_pivot.columns:
+            weight_pivot[col] = 0
+    
+    # Calculate utilization
+    result = pd.DataFrame({
+        'Region Family': volume_pivot.index,
+        'Brown Volume (#)': volume_pivot['Brown'].values,
+        'Green Volume (#)': volume_pivot['Green'].values,
+        'Brown KG': weight_pivot['Brown'].values,
+        'Green KG': weight_pivot['Green'].values
+    })
+    
+    result['Total Volume'] = result['Brown Volume (#)'] + result['Green Volume (#)']
+    result['Utilization %'] = (result['Brown Volume (#)'] / result['Total Volume'] * 100).fillna(0)
+    
+    # Sort by utilization
+    result = result.sort_values('Utilization %', ascending=False)
+    
+    return result
+
+def calculate_lane_stats(df: pd.DataFrame, selected_month: int = None, top_n: int = 30) -> pd.DataFrame:
+    """Calculate statistics by lane (Origin-Destination pairs)"""
+    
+    if selected_month:
+        df_filtered = df[df['Month'] == selected_month].copy()
+    else:
+        df_filtered = df.copy()
+    
+    # Get top lanes by total volume
+    top_lanes = df_filtered.groupby('Lane').size().nlargest(top_n).index
+    df_filtered = df_filtered[df_filtered['Lane'].isin(top_lanes)]
+    
+    # Group by lane and category
+    lane_stats = df_filtered.groupby(['Lane', 'Category']).agg({
+        'Airline': 'count',
+        'Weight_KG': 'sum'
+    }).rename(columns={'Airline': 'Volume'}).reset_index()
+    
+    # Pivot for easier calculation
+    volume_pivot = lane_stats.pivot_table(
+        index='Lane',
+        columns='Category',
+        values='Volume',
+        fill_value=0
+    )
+    
+    weight_pivot = lane_stats.pivot_table(
+        index='Lane',
+        columns='Category',
+        values='Weight_KG',
+        fill_value=0
+    )
+    
+    # Ensure columns exist
+    for col in ['Brown', 'Green']:
+        if col not in volume_pivot.columns:
+            volume_pivot[col] = 0
+        if col not in weight_pivot.columns:
+            weight_pivot[col] = 0
+    
+    # Calculate utilization
+    result = pd.DataFrame({
+        'Lane': volume_pivot.index,
+        'Brown Volume (#)': volume_pivot['Brown'].values,
+        'Green Volume (#)': volume_pivot['Green'].values,
+        'Brown KG': weight_pivot['Brown'].values,
+        'Green KG': weight_pivot['Green'].values
+    })
+    
+    result['Total Volume'] = result['Brown Volume (#)'] + result['Green Volume (#)']
+    result['Utilization %'] = (result['Brown Volume (#)'] / result['Total Volume'] * 100).fillna(0)
+    
+    # Sort by utilization
+    result = result.sort_values('Utilization %', ascending=False)
+    
+    return result
+
+def format_region_table(region_stats: pd.DataFrame) -> pd.DataFrame:
+    """Format region statistics for display"""
+    display_df = region_stats.copy()
+    
+    # Format numbers
+    display_df['Brown Volume (#)'] = display_df['Brown Volume (#)'].apply(lambda x: f"{int(x):,}")
+    display_df['Green Volume (#)'] = display_df['Green Volume (#)'].apply(lambda x: f"{int(x):,}")
+    display_df['Brown KG'] = display_df['Brown KG'].apply(lambda x: f"{x:,.0f}")
+    display_df['Green KG'] = display_df['Green KG'].apply(lambda x: f"{x:,.0f}")
+    display_df['Utilization %'] = display_df['Utilization %'].apply(lambda x: f"{x:.1f}%")
+    
+    # Remove total volume column for display
+    display_df = display_df[['Region Family', 'Brown Volume (#)', 'Green Volume (#)', 
+                             'Brown KG', 'Green KG', 'Utilization %']]
+    
+    return display_df
+
+def format_lane_table(lane_stats: pd.DataFrame) -> pd.DataFrame:
+    """Format lane statistics for display"""
+    display_df = lane_stats.copy()
+    
+    # Format numbers
+    display_df['Brown Volume (#)'] = display_df['Brown Volume (#)'].apply(lambda x: f"{int(x):,}")
+    display_df['Green Volume (#)'] = display_df['Green Volume (#)'].apply(lambda x: f"{int(x):,}")
+    display_df['Brown KG'] = display_df['Brown KG'].apply(lambda x: f"{x:,.0f}")
+    display_df['Green KG'] = display_df['Green KG'].apply(lambda x: f"{x:,.0f}")
+    display_df['Utilization %'] = display_df['Utilization %'].apply(lambda x: f"{x:.1f}%")
+    
+    # Remove total volume column for display
+    display_df = display_df[['Lane', 'Brown Volume (#)', 'Green Volume (#)', 
+                             'Brown KG', 'Green KG', 'Utilization %']]
+    
+    return display_df
+
+# ==================== VISUALIZATION FUNCTIONS ====================
+def create_utilization_chart(monthly_stats: pd.DataFrame, year: int) -> go.Figure:
+    """Create the utilization percentage chart"""
+    
+    # Filter out the total row
+    chart_data = monthly_stats[monthly_stats['Month'] <= 12].copy()
+    
+    fig = go.Figure()
+    
+    # Add utilization line
+    fig.add_trace(go.Scatter(
+        x=chart_data['Month_Name'],
+        y=chart_data['Utilization_%'],
+        mode='lines+markers+text',
+        name='BT Utilization %',
+        line=dict(color='#FF8C00', width=3),
+        marker=dict(size=10, color='#FF8C00'),
+        text=[f"{val:.1f}%" for val in chart_data['Utilization_%']],
+        textposition='top center',
+        textfont=dict(size=10),
+        hovertemplate='%{x}<br>Utilization: %{y:.1f}%<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f'BT Utilization % by Month and Year ({year})',
+        xaxis_title='Month',
+        yaxis_title='%',
+        yaxis=dict(range=[0, 100], gridcolor='#E0E0E0'),
+        xaxis=dict(gridcolor='#E0E0E0'),
+        height=400,
+        hovermode='x unified',
+        plot_bgcolor='white',
+        showlegend=False
+    )
+    
     return fig
 
-# ==================== APP ====================
-def main():
-    # Title
-    _, c, _ = st.columns([2,3,1])
-    with c:
-        st.markdown("<h1 style='text-align:center;'>Green to Brown <span style='color:#008B8B;'>Overall Utilization Stats</span> <span style='color:#FFA500;'>YoY</span></h1>", unsafe_allow_html=True)
-
-    xfile = st.file_uploader("Choose Excel file", type=["xlsx","xls"], label_visibility="collapsed")
-    if not xfile:
-        st.info("👆 Upload the Excel file to begin")
-        return
-
-    file_bytes = xfile.getvalue()
-    with st.spinner("Processing data..."):
-        df = load_data_from_bytes(file_bytes)
-
-    if df.empty:
-        st.error("No valid data to display. The file must contain non-empty 'POB as text' and 'Airline' columns.")
-        return
-
-    # Pick current year present in data
-    current_year = datetime.now().year
-    if current_year not in df["Year"].unique():
-        current_year = int(df["Year"].max())
-    df_cur = df[df["Year"] == current_year]
-
-    tab1, tab2 = st.tabs(["📊 Year Overview", "📈 Monthly Analysis"])
-
-    # ---------- TAB 1 ----------
-    with tab1:
-        st.markdown("### This Year To Date")
-        monthly_table, util_series = build_monthly_table(df_cur)
-        st.dataframe(monthly_table, use_container_width=True, hide_index=True, height=430)
-
-        st.markdown("### BT Utilization % by Month and Year")
-        fig = utilization_chart(MONTH_NAMES, util_series.values.tolist())
-        st.plotly_chart(fig, use_container_width=True)
-
-    # ---------- TAB 2 ----------
-    with tab2:
-        st.markdown("### Green to Brown <span style='color:#008B8B;'>Monthly Utilization Stats</span>", unsafe_allow_html=True)
-
-        available_months = sorted(df_cur["Month"].unique())
-        month_names = [MONTH_NAMES[m-1] for m in available_months if 1 <= m <= 12]
-        sel_name = st.selectbox("Select Month", month_names)
-        sel_month = MONTH_NAMES.index(sel_name) + 1
-
-        df_m = df_cur[df_cur["Month"] == sel_month]
-        if df_m.empty:
-            st.info("No data for the selected month.")
-            return
-
-        # KPIs
-        b_v, g_v, t_v, util, b_kg, g_kg = kpi_for_slice(df_m)
-        c1,c2,c3,c4,c5,c6 = st.columns(6)
-        c1.metric("BT Utilization", f"{util:.1f}%")
-        c2.metric("% Effective", "—")
-        c3.metric("This Year Volume", f"{t_v:,}")
-        c4.metric("—", "—")
-        c5.metric("Brown KG", f"{b_kg:,.0f}")
-        c6.metric("Green KG", f"{g_kg:,.0f}")
-
-        # By Region Family
-        left, right = st.columns(2)
-        with left:
-            st.markdown("#### Utilization by Region")
-            rg = (df_m
-                  .groupby(["Region Family","Is_UPS"], observed=True)
-                  .agg(Shipments=("Airline","size"), KG=("Weight_KG","sum"))
-                  .reset_index())
-            rg_p = (rg.pivot(index="Region Family", columns="Is_UPS", values="Shipments")
-                      .rename(columns={True:"Brown", False:"Green"})
-                      .fillna(0))
-            rg_kg = (rg.pivot(index="Region Family", columns="Is_UPS", values="KG")
-                      .rename(columns={True:"BrownKG", False:"GreenKG"})
-                      .fillna(0.0))
-            tbl = rg_p.join(rg_kg, how="outer").fillna(0)
-            tbl["Utilization %"] = (tbl["Brown"] / (tbl["Brown"] + tbl["Green"]).replace(0,np.nan) * 100).fillna(0.0)
-            disp = (tbl.reset_index()
-                    .assign(**{
-                        "Brown Volume (#)": lambda d: d["Brown"].astype(int).map(lambda x: f"{x:,}"),
-                        "Green Volume (#)": lambda d: d["Green"].astype(int).map(lambda x: f"{x:,}"),
-                        "Brown KG": lambda d: d["BrownKG"].map(lambda x: f"{x:,.0f}"),
-                        "Green KG": lambda d: d["GreenKG"].map(lambda x: f"{x:,.0f}"),
-                        "Utilization %": lambda d: d["Utilization %"].map(lambda x: f"{x:.1f}%")
-                    }))[
-                        ["Region Family","Brown Volume (#)","Green Volume (#)","Brown KG","Green KG","Utilization %"]
-                    ]
-            disp["_u"] = disp["Utilization %"].str.rstrip("%").astype(float)
-            disp = disp.sort_values("_u", ascending=False).drop(columns="_u")
-            st.dataframe(disp, use_container_width=True, hide_index=True, height=420)
-
-        # By Lane (Origin IATA → Destination IATA)
-        with right:
-            st.markdown("#### By Lane (Origin IATA → Destination IATA)")
-            top_lanes = (df_m.groupby("Lane").size().sort_values(ascending=False).head(30).index)
-            ln = (df_m[df_m["Lane"].isin(top_lanes)]
-                  .groupby(["Lane","Is_UPS"], observed=True)
-                  .agg(Shipments=("Airline","size"), KG=("Weight_KG","sum"))
-                  .reset_index())
-            ln_p = (ln.pivot(index="Lane", columns="Is_UPS", values="Shipments")
-                      .rename(columns={True:"Brown", False:"Green"})
-                      .fillna(0))
-            ln_kg = (ln.pivot(index="Lane", columns="Is_UPS", values="KG")
-                      .rename(columns={True:"BrownKG", False:"GreenKG"})
-                      .fillna(0.0))
-            lt = ln_p.join(ln_kg, how="outer").fillna(0)
-            lt["Utilization %"] = (lt["Brown"] / (lt["Brown"] + lt["Green"]).replace(0,np.nan) * 100).fillna(0.0)
-            disp_lane = (lt.reset_index()
-                         .assign(**{
-                             "Brown Volume (#)": lambda d: d["Brown"].astype(int).map(lambda x: f"{x:,}"),
-                             "Green Volume (#)": lambda d: d["Green"].astype(int).map(lambda x: f"{x:,}"),
-                             "Brown KG": lambda d: d["BrownKG"].map(lambda x: f"{x:,.0f}"),
-                             "Green KG": lambda d: d["GreenKG"].map(lambda x: f"{x:,.0f}"),
-                             "Utilization %": lambda d: d["Utilization %"].map(lambda x: f"{x:.1f}%")
-                         }))[
-                             ["Lane","Brown Volume (#)","Green Volume (#)","Brown KG","Green KG","Utilization %"]
-                         ]
-            st.dataframe(disp_lane, use_container_width=True, hide_index=True, height=420)
-
-        # Month-over-month pivots (fast)
-        with st.expander("📈 Month-over-month pivots"):
-            rf = (df_cur
-                  .groupby(["Month","Region Family","Is_UPS"], observed=True)
-                  .agg(Shipments=("Airline","size"))
-                  .reset_index())
-            rf_p = (rf.pivot_table(index=["Region Family","Month"], columns="Is_UPS", values="Shipments", fill_value=0)
-                      .rename(columns={True:"Brown", False:"Green"})
-                      .reset_index())
-            rf_p["Util %"] = (rf_p["Brown"] / (rf_p["Brown"] + rf_p["Green"]).replace(0,np.nan) * 100).fillna(0.0)
-            reg_pvt = rf_p.pivot(index="Region Family", columns="Month", values="Util %").fillna(0.0)
-            reg_pvt.columns = [MONTH_NAMES[m-1] for m in reg_pvt.columns]
-            st.markdown("**Utilization % by Region Family (MoM)**")
-            st.dataframe(reg_pvt.round(1), use_container_width=True)
-
-            top_lanes_all = (df_cur.groupby("Lane").size().sort_values(ascending=False).head(15).index)
-            lf = (df_cur[df_cur["Lane"].isin(top_lanes_all)]
-                  .groupby(["Month","Lane","Is_UPS"], observed=True)
-                  .agg(Shipments=("Airline","size"))
-                  .reset_index())
-            lf_p = (lf.pivot_table(index=["Lane","Month"], columns="Is_UPS", values="Shipments", fill_value=0)
-                      .rename(columns={True:"Brown", False:"Green"})
-                      .reset_index())
-            lf_p["Util %"] = (lf_p["Brown"] / (lf_p["Brown"] + lf_p["Green"]).replace(0,np.nan) * 100).fillna(0.0)
-            lane_pvt = lf_p.pivot(index="Lane", columns="Month", values="Util %").fillna(0.0)
-            lane_pvt.columns = [MONTH_NAMES[m-1] for m in lane_pvt.columns]
-            st.markdown("**Utilization % by Lane (MoM, Top 15)**")
-            st.dataframe(lane_pvt.round(1), use_container_width=True)
-
-if __name__ == "__main__":
-    main()
+def format_display_table(monthly_stats: pd.DataFrame) -> pd.DataFrame:
+    """Format the monthly statistics table for display"""
+    
+    # Create display dataframe
+    display_data = []
+    
+    # Brown Volume row
+    brown_vol = ['Brown Volume (#)']
+    for _, row in monthly_stats.iterrows():
+        if row['Month'] <= 12:
+            brown_vol.append(f"{int(row['Brown_Volume']):,}")
+    display_data.append(brown_vol)
+    
+    # Green Volume row
+    green_vol = ['Green Volume (#)']
+    for _, row in monthly_stats.iterrows():
+        if row['Month'] <= 12:
+            green_vol.append(f"{int(row['Green_Volume']):,}")
+    display_data.append(green_vol)
+    
+    # Utilization row
+    util_row = ['Utilization%']
+    for _, row in monthly_stats.iterrows():
+        if row['Month'] <= 12:
+            util_row.append(f"{row['Utilization_%']:.1f}%")
+    display_data.append(util_row)
+    
+    # Weight Impact row
+    weight_row = ['Weight Impact']
+    for _, row in monthly_stats.iterrows():
+        if row['Month'] <= 12:
+            total_weight = row['Brown_Weight'] + row['Green_Weight']
+            weight_row.append(f"{total_weight:,.0f} kg")
+    display_data.append(weight_row)
+    
+    # Brown Cost/kg row
+    brown_kg = ['Brown Cost/Kg']
+    for _, row in monthly_stats.iterrows():
+        if row['Month'] <= 12:
+            brown_kg.append(f"${row['Brown_Weight']:,.2f}")
+    display_data.append(brown_kg)
+    
+    # Green Cost/kg row
+    green_kg = ['Green Cost/Kg']
+    for _, row in monthly_stats.iterrows():
+        if row['Month'] <= 12:
+            green_kg.append(f"${row['Green_Weight']:,.2f}")
+    display_data.append(green_kg)
+    
+    # YoY Savings row
+    savings = ['YoY Savings']
+    for _, row in monthly_stats.iterrows():
+        if row['Month'] <= 12:
+            # Placeholder for YoY savings calculation
+            savings.append("—")
+    display_data.append(savings)
+    
+    # Create dataframe with month names as columns
+    months = ['January', 'February', 'March', 'April', 'May', 'June', 
+              'July', 'August', 'September', 'October', 'November', 'December']
+    
+    df_display = pd.DataFrame(display_data, columns=['Metric'] + months[:len(brown_vol)-1])
+    
+    # Add totals column
+    total_stats = monthly_stats[monthly_stats['Month'] == 13].iloc[0] if len(monthly_stats[monthly_stats['Month'] == 13]) > 0 else None
+    
+    if total_stats is not None:
+        df_display['Total'] = [
+            f"{int(total_stats['Brown_Volume']):,}",
+            f"{int(total_stats['Green_Volume']):,}",
+            f"{total_stats['Utilization_%']:.1f}%",
+            f"{total_stats['Brown_Weight'] + total_stats['Green_Weight']:,.0f} kg",
+            f"${total_stats['Brown_Weight']:,.2f}",
+            f"${total_stats['Green_Weight']:,.2f}",
+            "—"
+        ]
+    
+    return df_display
