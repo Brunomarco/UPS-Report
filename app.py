@@ -184,15 +184,19 @@ def create_utilization_chart(monthly_data):
         title='BT Utilization % by Month and Year',
         xaxis_title='Month',
         yaxis_title='%',
-        yaxis=dict(range=[0, 100]),
+        yaxis=dict(
+            range=[0, 100],
+            showgrid=True,
+            gridcolor='#E0E0E0'
+        ),
         height=400,
         hovermode='x',
         showlegend=False,
         plot_bgcolor='white',
         paper_bgcolor='white',
-        xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=True, gridcolor='#E0E0E0')
+        xaxis=dict(showgrid=False)
     )
+
     
     return fig
 
