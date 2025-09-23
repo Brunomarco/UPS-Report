@@ -70,7 +70,7 @@ def read_excel_fast(uploaded_file):
         return None
 
 def process_data_optimized(df):
-    """Highly optimized data processing"""
+    """Highly optimized data processing with proper date handling and filtering"""
     
     # Set seed for reproducibility
     np.random.seed(42)
@@ -78,36 +78,72 @@ def process_data_optimized(df):
     # Strip column names once
     df.columns = [col.strip() for col in df.columns]
     
-    # --- DATE HANDLING (FAST) ---
+    # --- CRITICAL: Remove rows with empty POB as text or Airline ---
+    # First, check if these columns exist
+    if 'POB as text' in df.columns:
+        # Remove rows where POB as text is empty, NaN, or just whitespace
+        df = df[df['POB as text'].notna()]
+        df = df[df['POB as text'].astype(str).str.strip() != '']
+    
+    if 'Airline' in df.columns:
+        # Remove rows where Airline is empty, NaN, or just whitespace
+        df = df[df['Airline'].notna()]
+        df = df[df['Airline'].astype(str).str.strip() != '']
+    
+    # If dataframe is empty after filtering, return early
+    if len(df) == 0:
+        st.warning("No valid data found after filtering empty rows")
+        return df
+    
+    # --- DATE HANDLING (FIXED FOR MM/DD/YYYY format) ---
     date_col_found = False
     
-    # Try to find a date column (limited search)
-    for col in ['Tender Date', 'POB as text', 'OriginDeparture Date']:
+    # Priority columns for date detection
+    date_columns_priority = ['POB as text', 'Tender Date', 'OriginDeparture Date']
+    
+    for col in date_columns_priority:
         if col in df.columns:
             try:
-                # Use pandas' fast date parser with infer_datetime_format
-                temp_dates = pd.to_datetime(df[col], errors='coerce', infer_datetime_format=True)
+                # Try parsing with MM/DD/YYYY format first
+                temp_dates = pd.to_datetime(df[col], format='%m/%d/%Y', errors='coerce')
+                
+                # If that didn't work well, try mixed format
+                if temp_dates.isna().sum() > len(df) * 0.7:
+                    temp_dates = pd.to_datetime(df[col], format='mixed', errors='coerce', dayfirst=False)
+                
+                # If we have at least 30% valid dates, use this column
                 if temp_dates.notna().sum() > len(df) * 0.3:
                     df['Date'] = temp_dates
                     date_col_found = True
                     break
-            except:
+            except Exception as e:
+                st.warning(f"Could not parse dates from {col}: {str(e)}")
                 continue
     
-    # If no date found, generate dates efficiently
+    # If no date found, generate dates for 2024
     if not date_col_found:
-        current_year = datetime.now().year
-        # Create evenly spaced dates
+        st.info("No valid date column found, generating sample dates for 2024")
+        # Generate dates for 2024
         df['Date'] = pd.date_range(
-            start=f'{current_year}-01-01',
+            start='2024-01-01',
             periods=len(df),
             freq='D'
         )[:len(df)]
+    
+    # Remove rows with invalid dates
+    df = df[df['Date'].notna()]
+    
+    if len(df) == 0:
+        st.error("No valid dates found in the data")
+        return df
     
     # Extract date components (vectorized)
     df['Month'] = df['Date'].dt.month
     df['Year'] = df['Date'].dt.year
     df['Month_Year'] = df['Date'].dt.to_period('M')
+    
+    # Validate months (1-12 only)
+    df = df[(df['Month'] >= 1) & (df['Month'] <= 12)]
     
     # --- WEIGHT HANDLING (FAST) ---
     weight_found = False
@@ -135,12 +171,14 @@ def process_data_optimized(df):
     if not cost_found:
         df['Cost'] = df['Weight_KG'] * np.random.uniform(5, 15, len(df))
     
-    # --- UPS IDENTIFICATION (FAST) ---
+    # --- UPS IDENTIFICATION (FIXED - Only "UPS Airlines") ---
     if 'Airline' in df.columns:
-        # Vectorized string operation
-        airline_upper = df['Airline'].astype(str).str.upper()
-        df['Is_UPS'] = airline_upper.str.contains('UPS', na=False)
+        # Clean the airline column and check for exact match "UPS Airlines"
+        df['Airline_Clean'] = df['Airline'].astype(str).str.strip()
+        # Mark as UPS only if it's exactly "UPS Airlines"
+        df['Is_UPS'] = df['Airline_Clean'] == 'UPS Airlines'
     else:
+        # If no Airline column, create sample data
         df['Is_UPS'] = np.random.choice([True, False], size=len(df), p=[0.3, 0.7])
     
     # --- REGION HANDLING (FAST) ---
@@ -148,13 +186,27 @@ def process_data_optimized(df):
         regions = ['EMEA-EMEA', 'AMERICAS-AMERICAS', 'APAC-APAC', 'EMEA-AMERICAS', 'AMERICAS-APAC']
         df['Region Lane'] = np.random.choice(regions, size=len(df))
     
-    # Vectorized region extraction
-    region_parts = df['Region Lane'].str.split('-', n=1, expand=True)
-    df['Origin Region'] = region_parts[0] if 0 in region_parts.columns else 'Unknown'
-    df['Destination Region'] = region_parts[1] if 1 in region_parts.columns else region_parts[0]
+    # Handle missing or invalid Region Lanes
+    df['Region Lane'] = df['Region Lane'].fillna('Unknown-Unknown')
+    
+    # Vectorized region extraction with error handling
+    try:
+        region_parts = df['Region Lane'].str.split('-', n=1, expand=True)
+        df['Origin Region'] = region_parts[0] if 0 in region_parts.columns else 'Unknown'
+        if 1 in region_parts.columns:
+            df['Destination Region'] = region_parts[1]
+        else:
+            df['Destination Region'] = df['Origin Region']
+    except:
+        df['Origin Region'] = 'Unknown'
+        df['Destination Region'] = 'Unknown'
     
     # --- COMMERCIAL COST (VECTORIZED) ---
     df['Commercial_Cost'] = np.where(df['Is_UPS'], df['Cost'] * 1.3, df['Cost'])
+    
+    # Final validation - remove any remaining invalid rows
+    df = df[df['Weight_KG'] > 0]
+    df = df[df['Cost'] > 0]
     
     return df
 
@@ -229,7 +281,7 @@ def display_metrics_row(metrics, col_titles):
             st.markdown('</div>', unsafe_allow_html=True)
 
 def main():
-    st.title("🚚 UPS Logistics Dashboard (Optimized)")
+    st.title("🚚 UPS Logistics Dashboard")
     
     # File uploader with CSV support
     uploaded_file = st.file_uploader(
@@ -251,28 +303,60 @@ def main():
                 df = read_excel_fast(uploaded_file)
                 
                 if df is not None and not df.empty:
+                    # Show initial row count
+                    initial_rows = len(df)
+                    
                     # Process data
                     df = process_data_optimized(df)
+                    
+                    # Check if we have data after processing
+                    if len(df) == 0:
+                        st.error("No valid data remaining after processing. Please check your file format.")
+                        st.stop()
                     
                     # Store in session state
                     st.session_state.processed_data = df
                     st.session_state.file_name = current_file_name
                     
                     process_time = time.time() - start_time
-                    st.success(f"✅ Processed {len(df):,} rows in {process_time:.1f} seconds")
+                    st.success(f"✅ Processed {len(df):,} valid rows (from {initial_rows:,} total) in {process_time:.1f} seconds")
+                    
+                    # Show data quality info
+                    if 'Airline' in df.columns:
+                        ups_count = df['Is_UPS'].sum()
+                        st.info(f"Found {ups_count:,} UPS Airlines shipments and {len(df) - ups_count:,} other shipments")
                 else:
                     st.error("Failed to load file or file is empty")
-                    return
+                    st.stop()
         
         # Use processed data from session state
         df = st.session_state.processed_data
         
-        # Get current year and filter
-        current_year = datetime.now().year
+        # Check if we have data
+        if df is None or len(df) == 0:
+            st.error("No data to display")
+            st.stop()
+        
+        # Get years available in data
+        available_years = sorted(df['Year'].unique())
+        
+        # Use 2024 as default if available, otherwise use the most recent year
+        if 2024 in available_years:
+            current_year = 2024
+        elif available_years:
+            current_year = max(available_years)
+        else:
+            st.error("No valid year data found")
+            st.stop()
+        
         df_current_year = df[df['Year'] == current_year].copy()
         
+        if len(df_current_year) == 0:
+            st.warning(f"No data found for year {current_year}")
+            st.stop()
+        
         # Create tabs
-        tab1, tab2 = st.tabs(["📊 Year Overview", "📈 Monthly Analysis"])
+        tab1, tab2, tab3 = st.tabs(["📊 Year Overview", "📈 Monthly Analysis", "📋 Data Quality"])
         
         with tab1:
             st.header(f"Year {current_year} Overview")
@@ -291,203 +375,280 @@ def main():
             # Monthly breakdown - optimized groupby
             st.subheader("Monthly Breakdown")
             
-            if not df_current_year.empty:
-                # Fast groupby using agg
-                monthly_agg = df_current_year.groupby('Month').agg({
-                    'Weight_KG': 'sum',
-                    'Cost': 'sum',
-                    'Is_UPS': 'mean'
-                }).reset_index()
-                
-                # Calculate UPS/non-UPS splits
+            # Get unique months and validate them
+            unique_months = sorted(df_current_year['Month'].unique())
+            valid_months = [m for m in unique_months if 1 <= m <= 12]
+            
+            if valid_months:
                 monthly_data = []
-                for month in monthly_agg['Month'].unique():
+                for month in valid_months:
                     month_df = df_current_year[df_current_year['Month'] == month]
-                    metrics = calculate_metrics_fast(month_df)
-                    
-                    monthly_data.append({
-                        'Month': datetime(current_year, month, 1).strftime('%B'),
-                        'Brown Volume (kg)': f"{metrics['brown_volume']:,.0f}",
-                        'Green Volume (kg)': f"{metrics['green_volume']:,.0f}",
-                        'Utilization %': f"{metrics['utilization']:.1f}%",
-                        'Savings ($)': f"${metrics['savings']:,.0f}",
-                        'Brown Cost/kg ($)': f"${metrics['brown_cost_per_kg']:.2f}",
-                        'Green Cost/kg ($)': f"${metrics['green_cost_per_kg']:.2f}"
-                    })
+                    if len(month_df) > 0:
+                        metrics = calculate_metrics_fast(month_df)
+                        
+                        try:
+                            month_name = datetime(current_year, int(month), 1).strftime('%B')
+                        except:
+                            month_name = f"Month {month}"
+                        
+                        monthly_data.append({
+                            'Month': month_name,
+                            'Brown Volume (kg)': f"{metrics['brown_volume']:,.0f}",
+                            'Green Volume (kg)': f"{metrics['green_volume']:,.0f}",
+                            'Utilization %': f"{metrics['utilization']:.1f}%",
+                            'Savings ($)': f"${metrics['savings']:,.0f}",
+                            'Brown Cost/kg ($)': f"${metrics['brown_cost_per_kg']:.2f}",
+                            'Green Cost/kg ($)': f"${metrics['green_cost_per_kg']:.2f}"
+                        })
                 
                 if monthly_data:
                     monthly_df = pd.DataFrame(monthly_data)
                     st.dataframe(monthly_df, use_container_width=True, hide_index=True)
-                
-                # Utilization Chart
-                st.subheader("Utilization Trend")
-                
-                util_data = []
-                for month in sorted(monthly_agg['Month'].unique()):
-                    month_df = df_current_year[df_current_year['Month'] == month]
-                    utilization = (month_df['Is_UPS'].sum() / len(month_df) * 100) if len(month_df) > 0 else 0
-                    util_data.append({
-                        'Month': datetime(current_year, month, 1).strftime('%B'),
-                        'Utilization %': utilization
-                    })
-                
-                if util_data:
-                    util_df = pd.DataFrame(util_data)
                     
-                    fig = px.line(util_df, x='Month', y='Utilization %', 
-                                 markers=True, title='UPS Utilization % by Month',
-                                 line_shape='spline')
-                    fig.update_traces(line_color='#6F4E37', line_width=3, marker_size=10)
-                    fig.update_layout(
-                        hovermode='x unified',
-                        height=400,
-                        xaxis_title="Month",
-                        yaxis_title="Utilization %",
-                        yaxis_range=[0, 100]
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                    # Utilization Chart
+                    st.subheader("Utilization Trend")
+                    
+                    util_data = []
+                    for month in valid_months:
+                        month_df = df_current_year[df_current_year['Month'] == month]
+                        if len(month_df) > 0:
+                            utilization = (month_df['Is_UPS'].sum() / len(month_df) * 100)
+                            try:
+                                month_name = datetime(current_year, int(month), 1).strftime('%B')
+                            except:
+                                month_name = f"Month {month}"
+                            
+                            util_data.append({
+                                'Month': month_name,
+                                'Utilization %': utilization
+                            })
+                    
+                    if util_data:
+                        util_df = pd.DataFrame(util_data)
+                        
+                        fig = px.line(util_df, x='Month', y='Utilization %', 
+                                     markers=True, title='UPS Utilization % by Month',
+                                     line_shape='spline')
+                        fig.update_traces(line_color='#6F4E37', line_width=3, marker_size=10)
+                        fig.update_layout(
+                            hovermode='x unified',
+                            height=400,
+                            xaxis_title="Month",
+                            yaxis_title="Utilization %",
+                            yaxis_range=[0, 100]
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No valid month data found")
         
         with tab2:
             st.header("Monthly Analysis")
             
-            # Month selector
+            # Month selector - only show valid months
             available_months = sorted(df['Month'].unique())
-            month_names = [datetime(2024, m, 1).strftime('%B') for m in available_months if m <= 12]
+            valid_months = [m for m in available_months if 1 <= m <= 12]
             
-            if month_names:
+            if valid_months:
+                month_names = []
+                for m in valid_months:
+                    try:
+                        month_names.append(datetime(2024, int(m), 1).strftime('%B'))
+                    except:
+                        month_names.append(f"Month {m}")
+                
                 selected_month_name = st.selectbox("Select Month", month_names)
-                selected_month = available_months[month_names.index(selected_month_name)]
+                selected_month = valid_months[month_names.index(selected_month_name)]
                 
                 # Filter data
                 df_month = df[df['Month'] == selected_month]
                 
-                # Monthly metrics
-                st.subheader(f"{selected_month_name} Overview")
-                month_metrics = calculate_metrics_fast(df_month)
-                display_metrics_row(
-                    month_metrics,
-                    ["🟫 Brown Volume (UPS)", "🟢 Green Volume (Others)", "📊 Utilization %", 
-                     "💰 Total Savings", "📦 Brown Cost/kg", "📦 Green Cost/kg"]
-                )
-                
-                # Region analysis
-                st.subheader("Analysis by Region Lane")
-                
-                region_data = []
-                for region in df_month['Region Lane'].unique():
-                    region_df = df_month[df_month['Region Lane'] == region]
-                    metrics = calculate_metrics_fast(region_df)
-                    
-                    region_data.append({
-                        'Region Lane': region,
-                        'Brown Volume (kg)': f"{metrics['brown_volume']:,.0f}",
-                        'Green Volume (kg)': f"{metrics['green_volume']:,.0f}",
-                        'Utilization %': f"{metrics['utilization']:.1f}%",
-                        'Savings ($)': f"${metrics['savings']:,.0f}",
-                        'Brown Cost/kg ($)': f"${metrics['brown_cost_per_kg']:.2f}",
-                        'Green Cost/kg ($)': f"${metrics['green_cost_per_kg']:.2f}"
-                    })
-                
-                if region_data:
-                    region_df_display = pd.DataFrame(region_data)
-                    st.dataframe(region_df_display, use_container_width=True, hide_index=True)
-                
-                # Origin-Destination Analysis
-                st.subheader("Analysis by Origin-Destination Region Pairs")
-                
-                # Create region pairs efficiently
-                df_month_copy = df_month.copy()
-                df_month_copy['Region_Pair'] = df_month_copy['Origin Region'] + ' → ' + df_month_copy['Destination Region']
-                
-                pair_data = []
-                for pair in df_month_copy['Region_Pair'].unique()[:10]:  # Limit to top 10 for performance
-                    pair_df = df_month_copy[df_month_copy['Region_Pair'] == pair]
-                    metrics = calculate_metrics_fast(pair_df)
-                    
-                    pair_data.append({
-                        'Region Pair': pair,
-                        'Brown Volume (kg)': f"{metrics['brown_volume']:,.0f}",
-                        'Green Volume (kg)': f"{metrics['green_volume']:,.0f}",
-                        'Utilization %': f"{metrics['utilization']:.1f}%",
-                        'Savings ($)': f"${metrics['savings']:,.0f}"
-                    })
-                
-                if pair_data:
-                    pair_df_display = pd.DataFrame(pair_data)
-                    st.dataframe(pair_df_display, use_container_width=True, hide_index=True)
-                
-                # Visualizations
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Pie chart
-                    fig_pie = go.Figure(data=[go.Pie(
-                        labels=['UPS (Brown)', 'Others (Green)'],
-                        values=[month_metrics['brown_volume'], month_metrics['green_volume']],
-                        hole=.3,
-                        marker_colors=['#6F4E37', '#228B22']
-                    )])
-                    fig_pie.update_layout(
-                        title=f"{selected_month_name} Volume Distribution",
-                        height=400
+                if len(df_month) > 0:
+                    # Monthly metrics
+                    st.subheader(f"{selected_month_name} Overview")
+                    month_metrics = calculate_metrics_fast(df_month)
+                    display_metrics_row(
+                        month_metrics,
+                        ["🟫 Brown Volume (UPS)", "🟢 Green Volume (Others)", "📊 Utilization %", 
+                         "💰 Total Savings", "📦 Brown Cost/kg", "📦 Green Cost/kg"]
                     )
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                
-                with col2:
-                    # Bar chart - optimized groupby
-                    region_volumes = df_month.groupby(['Region Lane', 'Is_UPS'])['Weight_KG'].sum().reset_index()
-                    region_volumes['Type'] = region_volumes['Is_UPS'].map({True: 'UPS', False: 'Others'})
                     
-                    fig_bar = px.bar(region_volumes, x='Region Lane', y='Weight_KG', color='Type',
-                                    title=f"{selected_month_name} Regional Volumes",
-                                    color_discrete_map={'UPS': '#6F4E37', 'Others': '#228B22'},
-                                    labels={'Weight_KG': 'Volume (kg)'})
-                    fig_bar.update_layout(height=400, xaxis_tickangle=-45)
-                    st.plotly_chart(fig_bar, use_container_width=True)
+                    # Region analysis
+                    st.subheader("Analysis by Region Lane")
+                    
+                    region_data = []
+                    unique_regions = df_month['Region Lane'].unique()
+                    for region in unique_regions[:20]:  # Limit to 20 regions for performance
+                        region_df = df_month[df_month['Region Lane'] == region]
+                        if len(region_df) > 0:
+                            metrics = calculate_metrics_fast(region_df)
+                            
+                            region_data.append({
+                                'Region Lane': region,
+                                'Brown Volume (kg)': f"{metrics['brown_volume']:,.0f}",
+                                'Green Volume (kg)': f"{metrics['green_volume']:,.0f}",
+                                'Utilization %': f"{metrics['utilization']:.1f}%",
+                                'Savings ($)': f"${metrics['savings']:,.0f}",
+                                'Brown Cost/kg ($)': f"${metrics['brown_cost_per_kg']:.2f}",
+                                'Green Cost/kg ($)': f"${metrics['green_cost_per_kg']:.2f}"
+                            })
+                    
+                    if region_data:
+                        region_df_display = pd.DataFrame(region_data)
+                        st.dataframe(region_df_display, use_container_width=True, hide_index=True)
+                    
+                    # Visualizations
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Pie chart
+                        fig_pie = go.Figure(data=[go.Pie(
+                            labels=['UPS Airlines', 'Other Airlines'],
+                            values=[month_metrics['brown_volume'], month_metrics['green_volume']],
+                            hole=.3,
+                            marker_colors=['#6F4E37', '#228B22']
+                        )])
+                        fig_pie.update_layout(
+                            title=f"{selected_month_name} Volume Distribution",
+                            height=400
+                        )
+                        st.plotly_chart(fig_pie, use_container_width=True)
+                    
+                    with col2:
+                        # Bar chart - optimized groupby
+                        region_volumes = df_month.groupby(['Region Lane', 'Is_UPS'])['Weight_KG'].sum().reset_index()
+                        region_volumes['Type'] = region_volumes['Is_UPS'].map({True: 'UPS Airlines', False: 'Others'})
+                        
+                        # Limit to top 10 regions by volume for clarity
+                        top_regions = region_volumes.groupby('Region Lane')['Weight_KG'].sum().nlargest(10).index
+                        region_volumes_filtered = region_volumes[region_volumes['Region Lane'].isin(top_regions)]
+                        
+                        fig_bar = px.bar(region_volumes_filtered, x='Region Lane', y='Weight_KG', color='Type',
+                                        title=f"{selected_month_name} Top 10 Regional Volumes",
+                                        color_discrete_map={'UPS Airlines': '#6F4E37', 'Others': '#228B22'},
+                                        labels={'Weight_KG': 'Volume (kg)'})
+                        fig_bar.update_layout(height=400, xaxis_tickangle=-45)
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                else:
+                    st.warning(f"No data found for {selected_month_name}")
+            else:
+                st.warning("No valid month data available")
+        
+        with tab3:
+            st.header("Data Quality Check")
+            
+            # Show data statistics
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Data Summary")
+                st.write(f"**Total Rows Processed:** {len(df):,}")
+                st.write(f"**Date Range:** {df['Date'].min().strftime('%m/%d/%Y')} to {df['Date'].max().strftime('%m/%d/%Y')}")
+                st.write(f"**Years in Data:** {', '.join(map(str, sorted(df['Year'].unique())))}")
+                st.write(f"**Months in Data:** {len(df['Month'].unique())}")
+                
+                if 'Airline' in df.columns:
+                    st.write(f"**Unique Airlines:** {df['Airline_Clean'].nunique()}")
+                    st.write(f"**UPS Airlines Shipments:** {df['Is_UPS'].sum():,}")
+                    st.write(f"**Other Airlines Shipments:** {(~df['Is_UPS']).sum():,}")
+            
+            with col2:
+                st.subheader("Data Validation")
+                
+                # Check for potential issues
+                issues = []
+                
+                # Check for dates outside expected range
+                if df['Year'].min() < 2020 or df['Year'].max() > 2025:
+                    issues.append("⚠️ Some dates appear to be outside 2020-2025 range")
+                
+                # Check for zero weights or costs
+                zero_weights = (df['Weight_KG'] == 0).sum()
+                if zero_weights > 0:
+                    issues.append(f"⚠️ {zero_weights} rows have zero weight")
+                
+                zero_costs = (df['Cost'] == 0).sum()
+                if zero_costs > 0:
+                    issues.append(f"⚠️ {zero_costs} rows have zero cost")
+                
+                # Check for missing regions
+                unknown_regions = (df['Region Lane'] == 'Unknown-Unknown').sum()
+                if unknown_regions > 0:
+                    issues.append(f"⚠️ {unknown_regions} rows have unknown regions")
+                
+                if issues:
+                    for issue in issues:
+                        st.warning(issue)
+                else:
+                    st.success("✅ No data quality issues detected")
+            
+            # Show sample of processed data
+            st.subheader("Sample of Processed Data (First 100 rows)")
+            
+            display_cols = ['Date', 'Weight_KG', 'Cost', 'Is_UPS', 'Region Lane']
+            if 'Airline_Clean' in df.columns:
+                display_cols.insert(1, 'Airline_Clean')
+            
+            available_cols = [col for col in display_cols if col in df.columns]
+            
+            st.dataframe(
+                df[available_cols].head(100),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Download button for processed data
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Processed Data as CSV",
+                data=csv,
+                file_name='ups_processed_data.csv',
+                mime='text/csv',
+            )
     
     else:
         st.info("Please upload a file to get started")
         
         # Add helpful tips
-        with st.expander("📚 Usage Guide & Performance Tips"):
+        with st.expander("📚 Usage Guide & Data Requirements"):
             st.markdown("""
-            ### Expected File Format:
-            - **Date columns**: Tender Date, POB as text, or OriginDeparture Date
-            - **Airline**: Should include 'UPS' for UPS shipments
-            - **Weight**: Column S or 'Volumetric Weight (KG)'
-            - **Cost**: Column T
-            - **Region columns**: Region Lane, Origin Region, Destination Region
+            ### Required Data Format:
+            
+            #### Critical Columns:
+            - **POB as text**: Date column in MM/DD/YYYY format (e.g., 1/11/2024)
+            - **Airline**: Must contain "UPS Airlines" exactly for UPS shipments
+            - **Rows with empty POB as text or Airline will be excluded**
+            
+            #### Optional Columns:
+            - **Volumetric Weight (KG)** or **Column S**: Weight data
+            - **Cost** or **Column T**: Cost data
+            - **Region Lane**: Regional information
+            
+            ### Important Notes:
+            - ⚠️ Only shipments with **"UPS Airlines"** (exact match) will be counted as UPS
+            - ⚠️ Rows with empty Airline or POB as text fields will be automatically removed
+            - ⚠️ Dates should be in MM/DD/YYYY format
             
             ### 🚀 Performance Tips:
-            1. **Use CSV format instead of Excel** - CSV files load 5-10x faster!
+            1. **Use CSV format** instead of Excel for faster loading
             2. **Remove unnecessary columns** before uploading
-            3. **Limit file size** to under 50MB for best performance
-            4. **Remove Excel formatting** - plain data loads faster
-            
-            ### To Convert Excel to CSV:
-            ```python
-            # In Excel: File → Save As → CSV
-            # Or in Python:
-            df = pd.read_excel('your_file.xlsx')
-            df.to_csv('your_file.csv', index=False)
-            ```
+            3. **Ensure date format is MM/DD/YYYY**
             """)
         
         # Sample data generator
         if st.button("Generate Sample Data"):
             with st.spinner("Generating sample data..."):
-                # Create sample dataframe
+                # Create sample dataframe with proper format
                 n_rows = 1000
-                current_year = datetime.now().year
+                
+                # Generate dates for 2024 in MM/DD/YYYY format
+                dates = pd.date_range(start='2024-01-01', end='2024-12-31', periods=n_rows)
                 
                 sample_df = pd.DataFrame({
-                    'Date': pd.date_range(start=f'{current_year}-01-01', periods=n_rows, freq='h')[:n_rows],
-                    'Airline': np.random.choice(['UPS', 'FedEx', 'DHL', 'Other'], n_rows, p=[0.3, 0.3, 0.2, 0.2]),
-                    'Volumetric Weight (KG)': np.random.uniform(10, 200, n_rows),
-                    'Cost': np.random.uniform(50, 500, n_rows),
-                    'Region Lane': np.random.choice(['EMEA-EMEA', 'AMERICAS-AMERICAS', 'APAC-APAC'], n_rows),
-                    'Origin Region': np.random.choice(['EMEA', 'AMERICAS', 'APAC'], n_rows),
-                    'Destination Region': np.random.choice(['EMEA', 'AMERICAS', 'APAC'], n_rows)
+                    'POB as text': dates.strftime('%m/%d/%Y'),  # MM/DD/YYYY format
+                    'Airline': np.random.choice(['UPS Airlines', 'FedEx', 'DHL', 'Other Airlines'], n_rows, p=[0.3, 0.3, 0.2, 0.2]),
+                    'Volumetric Weight (KG)': np.random.uniform(10, 200, n_rows).round(2),
+                    'Cost': np.random.uniform(50, 500, n_rows).round(2),
+                    'Region Lane': np.random.choice(['EMEA-EMEA', 'AMERICAS-AMERICAS', 'APAC-APAC', 'EMEA-AMERICAS'], n_rows),
                 })
                 
                 # Convert to CSV for download
@@ -500,7 +661,7 @@ def main():
                     mime='text/csv'
                 )
                 
-                st.success("Sample data generated! Download and upload it to test the dashboard.")
+                st.success("Sample data generated with correct date format (MM/DD/YYYY)!")
 
 if __name__ == "__main__":
     main()
