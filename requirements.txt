@@ -1,6 +1,6 @@
-# Latest stable versions for best compatibility
+# Using latest stable versions that work with Python 3.13
 streamlit
 pandas
 plotly
 openpyxl
-numpy
+numpy>=1.26.0  
