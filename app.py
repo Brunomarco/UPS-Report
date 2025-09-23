@@ -102,20 +102,37 @@ def load_data(file):
 
 # -------------------- METRICS --------------------
 def monthly_metrics(df_year):
-    """Return dict-of-series for table with months as columns."""
-    months = range(1,13)
-    # volumes (row counts)
-    brown_vol = {m: int((df_year["Month"]==m) & (df_year["Is_UPS"])).sum() for m in months}
-    green_vol = {m: int((df_year["Month"]==m) & (~df_year["Is_UPS"])).sum() for m in months}
-    # kgs
-    brown_kg = {m: float(df_year.loc[(df_year["Month"]==m) & (df_year["Is_UPS"]), "Weight_KG"].sum()) for m in months}
-    green_kg = {m: float(df_year.loc[(df_year["Month"]==m) & (~df_year["Is_UPS"]), "Weight_KG"].sum()) for m in months}
-    # utilization %
+    """Return dicts for Brown/Green volumes (#rows), KG, and Utilization% by month."""
+    months = range(1, 13)
+
+    # Volumes (# of rows)
+    brown_vol = {
+        m: int(((df_year["Month"] == m) & (df_year["Is_UPS"])).sum())
+        for m in months
+    }
+    green_vol = {
+        m: int(((df_year["Month"] == m) & (~df_year["Is_UPS"])).sum())
+        for m in months
+    }
+
+    # KG
+    brown_kg = {
+        m: float(df_year.loc[(df_year["Month"] == m) & (df_year["Is_UPS"]), "Weight_KG"].sum())
+        for m in months
+    }
+    green_kg = {
+        m: float(df_year.loc[(df_year["Month"] == m) & (~df_year["Is_UPS"]), "Weight_KG"].sum())
+        for m in months
+    }
+
+    # Utilization % (UPS volume / total volume)
     util = {}
     for m in months:
         tot = brown_vol[m] + green_vol[m]
         util[m] = (brown_vol[m] / tot * 100.0) if tot > 0 else 0.0
+
     return brown_vol, green_vol, brown_kg, green_kg, util
+
 
 def kpi_block(df_month):
     """Return dict of the same metrics for a given month dataframe."""
