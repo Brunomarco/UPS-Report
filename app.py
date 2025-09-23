@@ -7,7 +7,7 @@ from io import BytesIO
 import warnings
 warnings.filterwarnings("ignore")
 
-# -------------------- PAGE & CSS --------------------
+# ==================== PAGE & CSS ====================
 st.set_page_config(page_title="Green to Brown Utilization Stats", layout="wide", page_icon="✈️")
 st.markdown("""
 <style>
@@ -23,7 +23,7 @@ div[data-testid="metric-container"]{
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------- IATA → REGION MAPPING --------------------
+# ==================== IATA → REGION MAPPING ====================
 EUROPE_CODES = {
     "AMS","CDG","ORY","FRA","MUC","DUS","BER","HAM","CGN","BRU","LGG","LHR","LGW","STN","LTN","MAN","BHX","EDI",
     "DUB","MAD","BCN","VLC","AGP","PMI","LIS","OPO","MXP","LIN","FCO","VCE","ATH","ZRH","GVA","VIE","PRG","WAW",
@@ -47,42 +47,42 @@ def iata_to_region(code: str) -> str:
 
 MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
-# -------------------- DATA LOADING (fast & memory-aware) --------------------
+# ==================== LOAD DATA (fast & memory-safe) ====================
 @st.cache_data(show_spinner=False)
 def load_data_from_bytes(xlsx_bytes: bytes) -> pd.DataFrame:
     """
-    Read only the needed columns from the Excel, convert dtypes to save RAM,
-    and compute helper columns. Cached by file bytes.
+    Reads only the required columns, converts heavy text to category, and builds
+    helper columns. Cached by file bytes to avoid re-parsing.
     """
     bio = BytesIO(xlsx_bytes)
     xls = pd.ExcelFile(bio)
     sheet = "Export" if "Export" in xls.sheet_names else xls.sheet_names[0]
 
-    # Only the columns we truly need:
-    wanted = ["POB as text","Airline","Volumetric Weight (KG)","Origin IATA","Destination IATA"]
-    # Determine which of them exist (header-only parse)
-    header_df = pd.read_excel(BytesIO(xlsx_bytes), sheet_name=sheet, nrows=0, engine="openpyxl")
-    usecols = [c for c in header_df.columns if c in wanted]
+    # Columns we use
+    needed = ["POB as text","Airline","Volumetric Weight (KG)","Origin IATA","Destination IATA"]
+
+    # Detect available needed columns from headers
+    hdr = pd.read_excel(BytesIO(xlsx_bytes), sheet_name=sheet, nrows=0, engine="openpyxl")
+    usecols = [c for c in hdr.columns if c in needed]
 
     df = pd.read_excel(BytesIO(xlsx_bytes), sheet_name=sheet, usecols=usecols or None, engine="openpyxl")
+    df.columns = df.columns.str.strip()
 
-    # Clean & filter rows (only if Airline & POB as text present)
+    # Must have POB as text and Airline
     if "POB as text" not in df.columns or "Airline" not in df.columns:
         return pd.DataFrame()
 
-    df.columns = df.columns.str.strip()
+    # Filter rows: require date & airline (non-empty)
     df["Airline"] = df["Airline"].astype("string").str.strip()
-    df = df[ df["Airline"].notna() & (df["Airline"] != "") ]
-
-    # Parse dates
+    df = df[df["Airline"].notna() & (df["Airline"] != "")]
     df["Date"] = pd.to_datetime(df["POB as text"], errors="coerce", infer_datetime_format=True)
     df = df[df["Date"].notna()]
 
-    # Extract date parts
+    # Date parts
     df["Year"]  = df["Date"].dt.year.astype("int16")
     df["Month"] = df["Date"].dt.month.astype("int8")
 
-    # Weight (float32 to halve RAM vs float64)
+    # Weight
     if "Volumetric Weight (KG)" in df.columns:
         df["Weight_KG"] = pd.to_numeric(df["Volumetric Weight (KG)"], errors="coerce").fillna(0.0).astype("float32")
     else:
@@ -91,19 +91,18 @@ def load_data_from_bytes(xlsx_bytes: bytes) -> pd.DataFrame:
     # Brown vs Green
     df["Is_UPS"] = df["Airline"].str.upper().str.contains("UPS", na=False).astype("bool")
 
-    # IATA → Region + Lane
+    # IATA to Region + Lane
     if "Origin IATA" in df.columns and "Destination IATA" in df.columns:
-        df["Origin IATA"] = df["Origin IATA"].astype("string").str.upper()
-        df["Destination IATA"] = df["Destination IATA"].astype("string").str.upper()
-        # Category reduces memory a lot on 900k+ rows
-        df["Origin IATA"] = df["Origin IATA"].astype("category")
-        df["Destination IATA"] = df["Destination IATA"].astype("category")
+        df["Origin IATA"] = df["Origin IATA"].astype("string").str.upper().astype("category")
+        df["Destination IATA"] = df["Destination IATA"].astype("string").str.upper().astype("category")
 
-        # map regions
         df["Origin Region"] = df["Origin IATA"].astype(str).map(iata_to_region).astype("category")
         df["Destination Region"] = df["Destination IATA"].astype(str).map(iata_to_region).astype("category")
-        df["Region Family"] = np.where(
-            df["Origin Region"] == df["Destination Region"], df["Origin Region"].astype(str), "CROSS-REGION"
+
+        # FIXED: use pandas where (not np.where) so casting to category is valid
+        df["Region Family"] = df["Origin Region"].astype(str).where(
+            df["Origin Region"] == df["Destination Region"],
+            "CROSS-REGION"
         ).astype("category")
 
         df["Lane"] = (df["Origin IATA"].astype(str) + "-" + df["Destination IATA"].astype(str)).astype("category")
@@ -113,36 +112,34 @@ def load_data_from_bytes(xlsx_bytes: bytes) -> pd.DataFrame:
         df["Region Family"] = pd.Categorical(["OTHER"] * len(df))
         df["Lane"] = pd.Categorical(["UNKNOWN-UNKNOWN"] * len(df))
 
-    # Make Airline categorical to save memory
+    # Big memory win
     df["Airline"] = df["Airline"].astype("category")
 
     return df
 
-# -------------------- AGG HELPERS (vectorized) --------------------
-def build_monthly_table(df_year: pd.DataFrame) -> pd.DataFrame:
-    """Return formatted table like the screenshot (rows=metrics, columns=months+Total)."""
-    # Group once by Month and Is_UPS
+# ==================== AGG HELPERS (vectorized) ====================
+def build_monthly_table(df_year: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    """
+    Returns (display_table, util_series_by_month).
+    Table rows = metrics, columns = months + Total.
+    """
     g = (df_year
          .groupby(["Month","Is_UPS"], observed=True)
          .agg(Shipments=("Airline","size"),
               KG=("Weight_KG","sum"))
          .reset_index())
 
-    # Pivot to Brown/Green
     ship = g.pivot(index="Month", columns="Is_UPS", values="Shipments").fillna(0).rename(columns={True:"Brown", False:"Green"})
     kg   = g.pivot(index="Month", columns="Is_UPS", values="KG").fillna(0).rename(columns={True:"Brown", False:"Green"})
 
-    # Ensure all months exist 1..12
     ship = ship.reindex(range(1,13), fill_value=0)
     kg   = kg.reindex(range(1,13), fill_value=0.0)
 
     util = (ship["Brown"] / (ship["Brown"] + ship["Green"]).replace(0, np.nan) * 100).fillna(0.0)
 
-    # Build display table
-    df_out = pd.DataFrame({"Metric": ["Brown Volume (#)","Green Volume (#)","Brown KG","Green KG","Utilization %"]})
-
+    out = pd.DataFrame({"Metric": ["Brown Volume (#)","Green Volume (#)","Brown KG","Green KG","Utilization %"]})
     for m in range(1,13):
-        df_out[MONTH_NAMES[m-1]] = [
+        out[MONTH_NAMES[m-1]] = [
             f"{int(ship.loc[m,'Brown']):,}",
             f"{int(ship.loc[m,'Green']):,}",
             f"{kg.loc[m,'Brown']:,.0f}",
@@ -150,26 +147,24 @@ def build_monthly_table(df_year: pd.DataFrame) -> pd.DataFrame:
             f"{util.loc[m]:.1f}%"
         ]
 
-    # Totals column
     tot_brown_v = int(ship["Brown"].sum())
     tot_green_v = int(ship["Green"].sum())
     tot_brown_kg = float(kg["Brown"].sum())
     tot_green_kg = float(kg["Green"].sum())
     tot_util = (tot_brown_v / (tot_brown_v + tot_green_v) * 100) if (tot_brown_v + tot_green_v) > 0 else 0.0
 
-    df_out["Total"] = [
+    out["Total"] = [
         f"{tot_brown_v:,}",
         f"{tot_green_v:,}",
         f"{tot_brown_kg:,.0f}",
         f"{tot_green_kg:,.0f}",
         f"{tot_util:.1f}%"
     ]
-    return df_out, util.reindex(range(1,13), fill_value=0.0)
+    return out, util.reindex(range(1,13), fill_value=0.0)
 
 def kpi_for_slice(df_slice: pd.DataFrame):
     g = (df_slice.groupby("Is_UPS", observed=True)
-         .agg(Shipments=("Airline","size"),
-              KG=("Weight_KG","sum"))
+         .agg(Shipments=("Airline","size"), KG=("Weight_KG","sum"))
          .reindex([True, False], fill_value=0))
     brown_v = int(g.loc[True, "Shipments"]) if True in g.index else 0
     green_v = int(g.loc[False, "Shipments"]) if False in g.index else 0
@@ -179,7 +174,7 @@ def kpi_for_slice(df_slice: pd.DataFrame):
     green_kg = float(g.loc[False, "KG"]) if False in g.index else 0.0
     return brown_v, green_v, tot_v, util, brown_kg, green_kg
 
-# -------------------- CHART --------------------
+# ==================== CHART ====================
 def utilization_chart(month_names, values):
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -200,9 +195,9 @@ def utilization_chart(month_names, values):
     )
     return fig
 
-# -------------------- APP --------------------
+# ==================== APP ====================
 def main():
-    # Header
+    # Title
     _, c, _ = st.columns([2,3,1])
     with c:
         st.markdown("<h1 style='text-align:center;'>Green to Brown <span style='color:#008B8B;'>Overall Utilization Stats</span> <span style='color:#FFA500;'>YoY</span></h1>", unsafe_allow_html=True)
@@ -212,16 +207,15 @@ def main():
         st.info("👆 Upload the Excel file to begin")
         return
 
-    # Cache key = file bytes (so 930k rows are parsed only once per upload)
     file_bytes = xfile.getvalue()
     with st.spinner("Processing data..."):
         df = load_data_from_bytes(file_bytes)
 
     if df.empty:
-        st.error("No valid data to display. Ensure the file has 'POB as text' and 'Airline'.")
+        st.error("No valid data to display. The file must contain non-empty 'POB as text' and 'Airline' columns.")
         return
 
-    # Current year
+    # Pick current year present in data
     current_year = datetime.now().year
     if current_year not in df["Year"].unique():
         current_year = int(df["Year"].max())
@@ -229,7 +223,7 @@ def main():
 
     tab1, tab2 = st.tabs(["📊 Year Overview", "📈 Monthly Analysis"])
 
-    # ============ TAB 1 ============
+    # ---------- TAB 1 ----------
     with tab1:
         st.markdown("### This Year To Date")
         monthly_table, util_series = build_monthly_table(df_cur)
@@ -239,7 +233,7 @@ def main():
         fig = utilization_chart(MONTH_NAMES, util_series.values.tolist())
         st.plotly_chart(fig, use_container_width=True)
 
-    # ============ TAB 2 ============
+    # ---------- TAB 2 ----------
     with tab2:
         st.markdown("### Green to Brown <span style='color:#008B8B;'>Monthly Utilization Stats</span>", unsafe_allow_html=True)
 
@@ -263,7 +257,7 @@ def main():
         c5.metric("Brown KG", f"{b_kg:,.0f}")
         c6.metric("Green KG", f"{g_kg:,.0f}")
 
-        # ----- By Region Family -----
+        # By Region Family
         left, right = st.columns(2)
         with left:
             st.markdown("#### Utilization by Region")
@@ -271,7 +265,6 @@ def main():
                   .groupby(["Region Family","Is_UPS"], observed=True)
                   .agg(Shipments=("Airline","size"), KG=("Weight_KG","sum"))
                   .reset_index())
-            # pivot to columns Brown/Green
             rg_p = (rg.pivot(index="Region Family", columns="Is_UPS", values="Shipments")
                       .rename(columns={True:"Brown", False:"Green"})
                       .fillna(0))
@@ -290,14 +283,13 @@ def main():
                     }))[
                         ["Region Family","Brown Volume (#)","Green Volume (#)","Brown KG","Green KG","Utilization %"]
                     ]
-            # Sort by Util %
             disp["_u"] = disp["Utilization %"].str.rstrip("%").astype(float)
             disp = disp.sort_values("_u", ascending=False).drop(columns="_u")
             st.dataframe(disp, use_container_width=True, hide_index=True, height=420)
 
+        # By Lane (Origin IATA → Destination IATA)
         with right:
             st.markdown("#### By Lane (Origin IATA → Destination IATA)")
-            # top 30 lanes by shipments this month
             top_lanes = (df_m.groupby("Lane").size().sort_values(ascending=False).head(30).index)
             ln = (df_m[df_m["Lane"].isin(top_lanes)]
                   .groupby(["Lane","Is_UPS"], observed=True)
@@ -323,9 +315,8 @@ def main():
                          ]
             st.dataframe(disp_lane, use_container_width=True, hide_index=True, height=420)
 
-        # ----- Month-over-month pivots (optional, fast) -----
+        # Month-over-month pivots (fast)
         with st.expander("📈 Month-over-month pivots"):
-            # Region Family MoM
             rf = (df_cur
                   .groupby(["Month","Region Family","Is_UPS"], observed=True)
                   .agg(Shipments=("Airline","size"))
@@ -339,7 +330,6 @@ def main():
             st.markdown("**Utilization % by Region Family (MoM)**")
             st.dataframe(reg_pvt.round(1), use_container_width=True)
 
-            # Lane MoM (top 15 lanes overall)
             top_lanes_all = (df_cur.groupby("Lane").size().sort_values(ascending=False).head(15).index)
             lf = (df_cur[df_cur["Lane"].isin(top_lanes_all)]
                   .groupby(["Month","Lane","Is_UPS"], observed=True)
