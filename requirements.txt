@@ -1,5 +1,5 @@
-streamlit==1.28.2  (slightly older, more stable)
-pandas==2.0.3      (better performance than 2.1.x)
+streamlit==1.28.2  
+pandas==2.0.3     
 plotly==5.17.0     
 openpyxl==3.1.2    
 numpy==1.24.3
