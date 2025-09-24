@@ -740,9 +740,9 @@ def main():
                 pivot = mom_df.pivot(index='Region Pair', columns='Month', values='Utilization')
                 pivot = pivot.fillna(0).round(1)
                 
-                # Apply gradient coloring
+                # Display without gradient (matplotlib not available in deployment)
                 st.dataframe(
-                    pivot.style.background_gradient(cmap='RdYlGn', vmin=0, vmax=100),
+                    pivot,
                     use_container_width=True
                 )
             
@@ -772,8 +772,9 @@ def main():
                 lane_pivot = lane_df.pivot(index='Lane', columns='Month', values='Utilization')
                 lane_pivot = lane_pivot.fillna(0).round(1)
                 
+                # Display without gradient (matplotlib not available in deployment)
                 st.dataframe(
-                    lane_pivot.style.background_gradient(cmap='RdYlGn', vmin=0, vmax=100),
+                    lane_pivot,
                     use_container_width=True
                 )
         
