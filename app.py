@@ -452,9 +452,7 @@ def calculate_region_stats(df_month):
         
         results.append({
             'Region Pair': region_pair,
-            'Target %': '30.0%',  # Example target
-            'Actual Utilization %': f"{utilization:.1f}%",
-            '% Effective': f"{(utilization/30*100):.0f}%" if utilization > 0 else "0%",
+            'Utilization %': f"{utilization:.1f}%",
             'Brown Volume': f"{brown_vol:,}",
             'Green Volume': f"{green_vol:,}",
             'Total Volume': f"{total_vol:,}",
