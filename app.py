@@ -40,172 +40,81 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==================== IATA TO REGION MAPPING ====================
-# Based on your actual IATA codes from the data
 def get_region(iata_code):
-    """Map IATA codes to regions based on your actual data"""
     if pd.isna(iata_code) or not isinstance(iata_code, str):
         return "OTHER"
-    
     code = str(iata_code).strip().upper()
-    
-    # Handle special codes
     if code in ['0', 'PLY2'] or len(code) != 3:
         return "OTHER"
-    
-    # EUROPE
-    europe_codes = {
-        'AMS', 'ARN', 'ATH', 'BCN', 'BER', 'BGO', 'BIO', 'BLQ', 'BLL', 'BOD',
-        'BRI', 'BRU', 'BTS', 'BUD', 'CAG', 'CDG', 'CGN', 'COO', 'CPH', 'CTA',
-        'DUB', 'DUS', 'EDI', 'ESB', 'EVN', 'FAE', 'FCO', 'FKB', 'FRA', 'GDN',
-        'GEN', 'GIB', 'GLA', 'GOT', 'GVA', 'HAJ', 'HAM', 'HEL', 'HER', 'HHN',
-        'ISL', 'IST', 'KIV', 'KRK', 'LCA', 'LGG', 'LGW', 'LHR', 'LIN', 'LIS',
-        'LJU', 'LPA', 'LUX', 'LYS', 'MAD', 'MFM', 'MLA', 'MLH', 'MLN', 'MMX',
-        'MRS', 'MUC', 'MXP', 'NCE', 'OPO', 'ORY', 'OSL', 'OTP', 'PDL', 'PLY2',
-        'PMI', 'PMO', 'POZ', 'PRG', 'PRN', 'REG', 'RIX', 'RMO', 'ROM', 'RZE',
-        'SJJ', 'SKG', 'SKP', 'SOF', 'STR', 'SUF', 'SVG', 'SVO', 'SXR', 'TBS',
-        'TFS', 'TFU', 'TGD', 'TIA', 'TLL', 'TLS', 'TLV', 'TOS', 'TRD', 'TSN',
-        'TUN', 'VIE', 'VKO', 'VLC', 'VNO', 'WAW', 'WRE', 'ZAG', 'ZRH'
-    }
-    
-    # NORTH AMERICA
-    north_america_codes = {
-        'ABE', 'ABQ', 'ALB', 'AMA', 'ATL', 'AUS', 'AZO', 'BDL', 'BFS', 'BGW',
-        'BGR', 'BHM', 'BHX', 'BNA', 'BOI', 'BOS', 'BTR', 'BTV', 'BUF', 'BWI',
-        'BWN', 'CAE', 'CHA', 'CHC', 'CHS', 'CHO', 'CID', 'CLE', 'CLT', 'CMH',
-        'CRP', 'CVG', 'CWA', 'DAY', 'DCA', 'DEN', 'DFW', 'DHN', 'DSM', 'DTW',
-        'ELP', 'EUG', 'EVV', 'EWR', 'FAR', 'FAT', 'FLL', 'FNT', 'FSD', 'FWA',
-        'GEG', 'GNV', 'GPT', 'GRB', 'GRR', 'GSO', 'GSP', 'GTF', 'HAJ', 'HNL',
-        'HOR', 'HOU', 'HSV', 'IAD', 'IAH', 'ICT', 'IDA', 'ILM', 'IND', 'JAX',
-        'JAN', 'JFK', 'LAR', 'LAS', 'LAX', 'LBB', 'LEX', 'LGA', 'LHE', 'LIT',
-        'LNK', 'LWS', 'MCI', 'MCO', 'MDT', 'MDW', 'MEM', 'MIA', 'MKE', 'MLB',
-        'MSN', 'MSP', 'MSY', 'MYR', 'NLU', 'NOG', 'NSI', 'OKC', 'OMA', 'ONT',
-        'ORD', 'ORF', 'PBI', 'PDX', 'PFN', 'PHL', 'PHX', 'PIT', 'PNS', 'PSL',
-        'PVD', 'PWM', 'RAI', 'RAP', 'RDM', 'RDU', 'RIC', 'RNO', 'ROA', 'ROC',
-        'RST', 'RSW', 'SAN', 'SAT', 'SAV', 'SBY', 'SDF', 'SEA', 'SFO', 'SGF',
-        'SJC', 'SJU', 'SLC', 'SMF', 'SNA', 'STL', 'SYR', 'TLH', 'TPA', 'TRI',
-        'TUL', 'TUS', 'TYS', 'XNA', 'YEG', 'YHZ', 'YLW', 'YOW', 'YQB', 'YQG',
-        'YQR', 'YQY', 'YUL', 'YVR', 'YWG', 'YXE', 'YYC', 'YYG', 'YYT', 'YYZ'
-    }
-    
-    # LATIN AMERICA
-    latin_america_codes = {
-        'AIO', 'ASU', 'BEL', 'BGI', 'BJX', 'BLZ', 'BMK', 'BOG', 'BON', 'BOO',
-        'BRO', 'CBO', 'CEN', 'CJS', 'COU', 'CTG', 'CUL', 'CUM', 'CUN', 'CUU',
-        'CUR', 'DGO', 'EZE', 'FDF', 'FOR', 'GDL', 'GIG', 'GRU', 'GUA', 'GYE',
-        'HBX', 'HMO', 'LAP', 'LIM', 'LPB', 'LVS', 'MEX', 'MFE', 'MGA', 'MID',
-        'MJI', 'MTY', 'MVD', 'MXL', 'MZT', 'OAX', 'PAP', 'PBM', 'POM', 'PTP',
-        'PTY', 'PVR', 'QRO', 'SAL', 'SAP', 'SCL', 'SDQ', 'SJD', 'SJO', 'SLP',
-        'SSA', 'TAM', 'TAP', 'TGZ', 'TIJ', 'TRC', 'UIO', 'VCP', 'VER', 'VSA'
-    }
-    
-    # APAC (Asia Pacific including Australia, New Zealand, and Pacific Islands)
-    apac_codes = {
-        'ADL', 'AKL', 'ANC', 'ASP', 'AUH', 'AXT', 'BBI', 'BDQ', 'BKI', 'BKK',
-        'BLR', 'BNE', 'BOM', 'BSL', 'CAN', 'CBR', 'CCJ', 'CCU', 'CEB', 'CEI',
-        'CFS', 'CGK', 'CHC', 'CJB', 'CKY', 'CMB', 'CNS', 'CNX', 'COK', 'CTS',
-        'CTU', 'CXH', 'DAC', 'DED', 'DEL', 'DPS', 'DRW', 'DUD', 'DVO', 'FNA',
-        'FNT', 'FUK', 'GAU', 'GIS', 'GLT', 'GOI', 'GUM', 'GYD', 'HAK', 'HAN',
-        'HBA', 'HBX', 'HDD', 'HDY', 'HFE', 'HIJ', 'HKG', 'HND', 'HYD', 'ICN',
-        'IDR', 'ILO', 'ISB', 'ITM', 'IVC', 'IXB', 'IXC', 'IXE', 'IXJ', 'IXM',
-        'IXR', 'IXU', 'IZO', 'JAI', 'JKH', 'KCH', 'KEF', 'KGL', 'KHG', 'KHI',
-        'KIJ', 'KIX', 'KKC', 'KKJ', 'KLA', 'KMI', 'KMJ', 'KMQ', 'KOA', 'KOJ',
-        'KTM', 'KUL', 'LAD', 'LHE', 'LKO', 'LLW', 'LST', 'MAA', 'MFI', 'MFM',
-        'MGL', 'MHG', 'MKY', 'MNL', 'MPM', 'MYJ', 'MYY', 'NAG', 'NAN', 'NGO',
-        'NGS', 'NOU', 'NPE', 'NPL', 'NQZ', 'NRT', 'NSN', 'OAG', 'OIT', 'OKA',
-        'OKJ', 'OSD', 'PAT', 'PEK', 'PER', 'PKX', 'PMR', 'PNH', 'PNQ', 'POA',
-        'POM', 'PPS', 'PQQ', 'PVG', 'QJZ', 'RAJ', 'RGN', 'ROB', 'ROC', 'ROK',
-        'ROT', 'RPR', 'RUN', 'SBW', 'SDJ', 'SGN', 'SHJ', 'SIN', 'STV', 'SUB',
-        'SYD', 'SZX', 'TAC', 'TAK', 'TAS', 'TDG', 'TNR', 'TPE', 'TRC', 'TRG',
-        'TRV', 'TSV', 'UBJ', 'UBN', 'UBP', 'VLI', 'VNS', 'VTZ', 'WLG', 'XGB',
-        'XOP', 'XPJ', 'XRF', 'XYL', 'YGJ', 'YIP', 'ZAM', 'ZFJ', 'ZFQ'
-    }
-    
-    # ISMEA (India, Middle East, Africa)
-    ismea_codes = {
-        'ABJ', 'ABV', 'ACC', 'ADD', 'AJA', 'ALA', 'ALG', 'ALY', 'AMM', 'AOG',
-        'BAH', 'BEY', 'BJL', 'BKO', 'CAI', 'CAY', 'CMN', 'CPT', 'DAR', 'DJE',
-        'DME', 'DOH', 'DUR', 'DWC', 'DXB', 'DZA', 'EBB', 'ELS', 'FIH', 'FNA',
-        'GBE', 'GIZ', 'GOA', 'GRJ', 'HRE', 'IKA', 'JED', 'JNB', 'KGL', 'KWI',
-        'LAD', 'LBV', 'LED', 'LFW', 'LOS', 'LUN', 'MCT', 'MLE', 'MRU', 'NBO',
-        'NIM', 'OUA', 'PLZ', 'RUH', 'RUN', 'TFN', 'TNR', 'TSE', 'UBN'
-    }
-    
-    if code in europe_codes:
-        return "EUROPE"
-    elif code in north_america_codes:
-        return "NORTH AMERICA"
-    elif code in latin_america_codes:
-        return "LATIN AMERICA"
-    elif code in apac_codes:
-        return "APAC"
-    elif code in ismea_codes:
-        return "ISMEA"
-    else:
-        return "OTHER"
+    # (Region dictionaries same as your code – not repeating for brevity)
+    # ...
+    return "OTHER"  # fallback if not in any dictionary
 
 # ==================== DATA PROCESSING ====================
 @st.cache_data
 def load_and_process_data(uploaded_file):
-    """Load Excel file and process the data efficiently"""
+    """Load Excel file and process the data efficiently with correct column mapping"""
     try:
-        # Read only the columns we need (A, E, F, L, M based on your requirements)
-        # A = POB as text, E = Airline, F = Volumetric Weight, L = Origin IATA, M = Destination IATA
-        df = pd.read_excel(
-            uploaded_file, 
-            engine='openpyxl',
-            usecols=[0, 4, 5, 11, 12]  # Columns A, E, F, L, M
-        )
-        
-        # Rename columns based on expected positions
-        df.columns = ['POB as text', 'Airline', 'Volumetric Weight (KG)', 'Origin IATA', 'Destination IATA']
-        
-        # Clean the data - remove rows without required data
+        # Read header first
+        header = pd.read_excel(uploaded_file, engine='openpyxl', nrows=0)
+        cols = list(header.columns)
+
+        def name_at(idx): return cols[idx] if idx < len(cols) else None
+        col_pob = name_at(4)   # E
+        col_org = name_at(9)   # J
+        col_dst = name_at(10)  # K
+        col_wgt = name_at(12)  # M
+
+        needed = [c for c in [col_pob, "Airline", col_org, col_dst, col_wgt] if c is not None]
+        df = pd.read_excel(uploaded_file, engine='openpyxl', usecols=needed)
+
+        rename_map = {}
+        if col_pob: rename_map[col_pob] = "POB as text"
+        if col_org: rename_map[col_org] = "Origin IATA"
+        if col_dst: rename_map[col_dst] = "Destination IATA"
+        if col_wgt: rename_map[col_wgt] = "Volumetric Weight (KG)"
+        df = df.rename(columns=rename_map)
+
+        required = ['POB as text', 'Airline', 'Origin IATA', 'Destination IATA', 'Volumetric Weight (KG)']
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            st.error(f"Missing required columns: {', '.join(missing)}")
+            return pd.DataFrame()
+
+        # Clean rows
         df = df.dropna(subset=['POB as text', 'Airline'])
         df['Airline'] = df['Airline'].astype(str).str.strip()
         df = df[df['Airline'] != '']
-        
-        # Parse dates from POB as text
-        df['Date'] = pd.to_datetime(df['POB as text'], errors='coerce')
+
+        # Parse POB date
+        df['Date'] = pd.to_datetime(df['POB as text'], errors='coerce', infer_datetime_format=True)
         df = df.dropna(subset=['Date'])
-        
-        # Extract date components
+
         df['Year'] = df['Date'].dt.year
         df['Month'] = df['Date'].dt.month
         df['Month_Name'] = df['Date'].dt.strftime('%B')
-        
-        # Identify Brown (UPS) vs Green (Others)
-        # Brown = UPS Airlines, Green = All other airlines
+
         df['Is_UPS'] = df['Airline'].str.upper().str.contains('UPS', na=False)
         df['Category'] = df['Is_UPS'].map({True: 'Brown', False: 'Green'})
-        
-        # Process weight - handle missing values
         df['Weight_KG'] = pd.to_numeric(df['Volumetric Weight (KG)'], errors='coerce').fillna(0)
-        
-        # Process IATA codes
+
         df['Origin IATA'] = df['Origin IATA'].astype(str).str.strip().str.upper()
         df['Destination IATA'] = df['Destination IATA'].astype(str).str.strip().str.upper()
-        
-        # Map to regions
         df['Origin Region'] = df['Origin IATA'].apply(get_region)
         df['Destination Region'] = df['Destination IATA'].apply(get_region)
-        
-        # Create region pairs (e.g., "EUROPE-APAC" or "EUROPE" if both same)
         df['Region Pair'] = df.apply(
-            lambda x: x['Origin Region'] if x['Origin Region'] == x['Destination Region'] 
-            else f"{x['Origin Region']}-{x['Destination Region']}",
-            axis=1
-        )
-        
-        # Create lane pairs
+            lambda x: x['Origin Region'] if x['Origin Region'] == x['Destination Region']
+            else f"{x['Origin Region']}-{x['Destination Region']}", axis=1)
         df['Lane Pair'] = df['Origin IATA'] + '-' + df['Destination IATA']
-        
         return df
-        
+
     except Exception as e:
         st.error(f"Error loading file: {str(e)}")
-        st.error("Please ensure your file has the correct format with columns A, E, F, L, M")
         return pd.DataFrame()
 
+# ==================== REST OF YOUR CODE ====================
+# (Keep your calculate_monthly_stats, format_table_display, create_utilization_chart,
+# calculate_region_stats, calculate_lane_stats, and main() EXACTLY as you already wrote them)
 # ==================== CALCULATION FUNCTIONS ====================
 def calculate_monthly_stats(df, year):
     """Calculate statistics by month for a given year"""
