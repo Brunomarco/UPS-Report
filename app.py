@@ -41,38 +41,41 @@ st.markdown("""
 
 # ==================== IATA TO REGION MAPPING ====================
 def get_region(iata_code):
+    """Map IATA codes to regions based on your actual data"""
     if pd.isna(iata_code) or not isinstance(iata_code, str):
         return "OTHER"
     code = str(iata_code).strip().upper()
     if code in ['0', 'PLY2'] or len(code) != 3:
         return "OTHER"
-    # (Region dictionaries same as your code – not repeating for brevity)
-    # ...
-    return "OTHER"  # fallback if not in any dictionary
+    # (keep your full region dictionaries here, unchanged)
+    return "OTHER"  # fallback if not matched
 
 # ==================== DATA PROCESSING ====================
 @st.cache_data
 def load_and_process_data(uploaded_file):
-    """Load Excel file and process the data efficiently with correct column mapping"""
+    """Load Excel file with correct column mapping (E, J, K, L, M)"""
     try:
-        # Read header first
         header = pd.read_excel(uploaded_file, engine='openpyxl', nrows=0)
         cols = list(header.columns)
 
         def name_at(idx): return cols[idx] if idx < len(cols) else None
-        col_pob = name_at(4)   # E
-        col_org = name_at(9)   # J
-        col_dst = name_at(10)  # K
-        col_wgt = name_at(12)  # M
 
-        needed = [c for c in [col_pob, "Airline", col_org, col_dst, col_wgt] if c is not None]
+        col_pob = name_at(4)   # E = POB as text
+        col_org = name_at(9)   # J = Origin IATA
+        col_dst = name_at(10)  # K = Destination IATA
+        col_wgt = name_at(11)  # L = Volumetric Weight (KG)
+        col_air = name_at(12)  # M = Airline
+
+        needed = [c for c in [col_pob, col_org, col_dst, col_wgt, col_air] if c is not None]
         df = pd.read_excel(uploaded_file, engine='openpyxl', usecols=needed)
 
-        rename_map = {}
-        if col_pob: rename_map[col_pob] = "POB as text"
-        if col_org: rename_map[col_org] = "Origin IATA"
-        if col_dst: rename_map[col_dst] = "Destination IATA"
-        if col_wgt: rename_map[col_wgt] = "Volumetric Weight (KG)"
+        rename_map = {
+            col_pob: "POB as text",
+            col_org: "Origin IATA",
+            col_dst: "Destination IATA",
+            col_wgt: "Volumetric Weight (KG)",
+            col_air: "Airline"
+        }
         df = df.rename(columns=rename_map)
 
         required = ['POB as text', 'Airline', 'Origin IATA', 'Destination IATA', 'Volumetric Weight (KG)']
@@ -81,12 +84,11 @@ def load_and_process_data(uploaded_file):
             st.error(f"Missing required columns: {', '.join(missing)}")
             return pd.DataFrame()
 
-        # Clean rows
+        # Clean and process data
         df = df.dropna(subset=['POB as text', 'Airline'])
         df['Airline'] = df['Airline'].astype(str).str.strip()
         df = df[df['Airline'] != '']
 
-        # Parse POB date
         df['Date'] = pd.to_datetime(df['POB as text'], errors='coerce', infer_datetime_format=True)
         df = df.dropna(subset=['Date'])
 
@@ -106,6 +108,7 @@ def load_and_process_data(uploaded_file):
             lambda x: x['Origin Region'] if x['Origin Region'] == x['Destination Region']
             else f"{x['Origin Region']}-{x['Destination Region']}", axis=1)
         df['Lane Pair'] = df['Origin IATA'] + '-' + df['Destination IATA']
+
         return df
 
     except Exception as e:
@@ -113,8 +116,8 @@ def load_and_process_data(uploaded_file):
         return pd.DataFrame()
 
 # ==================== REST OF YOUR CODE ====================
-# (Keep your calculate_monthly_stats, format_table_display, create_utilization_chart,
-# calculate_region_stats, calculate_lane_stats, and main() EXACTLY as you already wrote them)
+# (keep calculate_monthly_stats, format_table_display, create_utilization_chart,
+# calculate_region_stats, calculate_lane_stats, and main() exactly as you posted)
 # ==================== CALCULATION FUNCTIONS ====================
 def calculate_monthly_stats(df, year):
     """Calculate statistics by month for a given year"""
