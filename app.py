@@ -53,13 +53,16 @@ def get_region(iata_code):
 # ==================== DATA PROCESSING ====================
 @st.cache_data
 def load_and_process_data(uploaded_file):
-    """Load Excel file with correct column mapping (E, J, K, L, M)"""
+    """Load Excel file and process the data using correct columns (E, J, K, L, M)"""
     try:
+        # Read header first to get actual column names
         header = pd.read_excel(uploaded_file, engine='openpyxl', nrows=0)
         cols = list(header.columns)
 
-        def name_at(idx): return cols[idx] if idx < len(cols) else None
+        def name_at(idx): 
+            return cols[idx] if idx < len(cols) else None
 
+        # Column mapping based on your latest clarification
         col_pob = name_at(4)   # E = POB as text
         col_org = name_at(9)   # J = Origin IATA
         col_dst = name_at(10)  # K = Destination IATA
@@ -69,6 +72,7 @@ def load_and_process_data(uploaded_file):
         needed = [c for c in [col_pob, col_org, col_dst, col_wgt, col_air] if c is not None]
         df = pd.read_excel(uploaded_file, engine='openpyxl', usecols=needed)
 
+        # Rename columns consistently so rest of code works
         rename_map = {
             col_pob: "POB as text",
             col_org: "Origin IATA",
@@ -84,11 +88,12 @@ def load_and_process_data(uploaded_file):
             st.error(f"Missing required columns: {', '.join(missing)}")
             return pd.DataFrame()
 
-        # Clean and process data
+        # Data cleaning
         df = df.dropna(subset=['POB as text', 'Airline'])
         df['Airline'] = df['Airline'].astype(str).str.strip()
         df = df[df['Airline'] != '']
 
+        # Convert date
         df['Date'] = pd.to_datetime(df['POB as text'], errors='coerce', infer_datetime_format=True)
         df = df.dropna(subset=['Date'])
 
@@ -96,17 +101,22 @@ def load_and_process_data(uploaded_file):
         df['Month'] = df['Date'].dt.month
         df['Month_Name'] = df['Date'].dt.strftime('%B')
 
+        # Brown vs Green split
         df['Is_UPS'] = df['Airline'].str.upper().str.contains('UPS', na=False)
         df['Category'] = df['Is_UPS'].map({True: 'Brown', False: 'Green'})
+
         df['Weight_KG'] = pd.to_numeric(df['Volumetric Weight (KG)'], errors='coerce').fillna(0)
 
+        # IATA processing
         df['Origin IATA'] = df['Origin IATA'].astype(str).str.strip().str.upper()
         df['Destination IATA'] = df['Destination IATA'].astype(str).str.strip().str.upper()
         df['Origin Region'] = df['Origin IATA'].apply(get_region)
         df['Destination Region'] = df['Destination IATA'].apply(get_region)
+
         df['Region Pair'] = df.apply(
-            lambda x: x['Origin Region'] if x['Origin Region'] == x['Destination Region']
-            else f"{x['Origin Region']}-{x['Destination Region']}", axis=1)
+            lambda x: x['Origin Region'] if x['Origin Region'] == x['Destination Region'] 
+            else f"{x['Origin Region']}-{x['Destination Region']}", axis=1
+        )
         df['Lane Pair'] = df['Origin IATA'] + '-' + df['Destination IATA']
 
         return df
@@ -114,6 +124,7 @@ def load_and_process_data(uploaded_file):
     except Exception as e:
         st.error(f"Error loading file: {str(e)}")
         return pd.DataFrame()
+
 
 # ==================== REST OF YOUR CODE ====================
 # (keep calculate_monthly_stats, format_table_display, create_utilization_chart,
